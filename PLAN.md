@@ -171,8 +171,8 @@ Settings: `bibliography: ../docs/references.bib`; a CSL style (for example `apa`
 
 **Cross-referencing mechanism.** `_helpers.py` provides:
 - `show_source(obj)`: prints the source of a function or class as a fenced code block (via `inspect.getsource`), so the book always shows the real code.
-- `api_link("glassnn.nn.Linear")`: the URL of the corresponding Sphinx page.
-- `src_link("src/glassnn/tensor.py", 40, 75)`: a permanent link to those lines at the current git tag (falls back to `main`).
+- `api_url("glassnn.nn.Linear")`: the URL of the corresponding Sphinx page; `api_link(name, text=None)`: the same as a Markdown link.
+- `src_url("src/glassnn/tensor.py", 40, 75)` or `src_url("glassnn.tensor._unbroadcast")`: a permanent link to those lines (or to the object's lines, found with `inspect`) at the current git tag (falls back to `main`); `src_link(...)`: the same as a Markdown link.
 - Each Sphinx page links back to the book chapter listed in the chapter map.
 
 Each milestone of section 7 adds or completes the book chapters that cover the code it delivers; a milestone is not finished while its chapters are missing or not executing.
@@ -301,5 +301,7 @@ Software
 | 15 | dtype of new tensors | floating input (lists, scalars, arrays of any float dtype) is cast to the default dtype unless `dtype=` is given; integer and boolean input keeps its dtype. Differs from PyTorch, which keeps the dtype of a NumPy array |
 | 16 | Elementwise ops in M1 | `exp` and `log` are `Tensor` methods from M1 on |
 | 17 | Graph after `backward` | kept (a second `backward` works without `retain_graph`); documented as a difference from PyTorch |
+| 18 | Book helper names | `api_url`/`src_url` return URLs, `api_link`/`src_link` return Markdown links; `src_url` also accepts an object name |
+| 19 | Global state | backend, random generator and the grad-mode flag of `no_grad` (as in PyTorch) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.
