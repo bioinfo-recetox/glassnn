@@ -13,6 +13,7 @@ annotated git tags.
   version derived from git tags, MIT license, empty Sphinx API reference and
   empty Quarto book, pre-commit configuration, CI, site deployment and
   release workflows.
+- IEEE citation style (CSL, CC BY-SA 3.0) for the book.
 
 ## Later
 

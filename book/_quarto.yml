@@ -13,6 +13,7 @@ book:
     - references.qmd
 
 bibliography: ../docs/references.bib
+csl: assets/ieee.csl
 
 execute:
   freeze: auto
