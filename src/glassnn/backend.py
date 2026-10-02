@@ -9,6 +9,8 @@ Always access the array module as ``backend.xp`` at call time. Writing
 ``from glassnn.backend import xp`` copies the module that is active at import
 time and does not follow later calls to :func:`set_backend`.
 
+Book chapter: :book:`Introduction <chapters/01-introduction.html>`.
+
 Example:
     >>> from glassnn import backend
     >>> backend.get_backend()

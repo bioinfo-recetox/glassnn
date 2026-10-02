@@ -14,6 +14,8 @@ product :cite:p:`baydin2018automatic`. :meth:`Tensor.backward` visits the
 nodes in reverse topological order and adds up the contributions, which is
 the chain rule :cite:p:`rumelhart1986learning,griewank2008evaluating`.
 
+Book chapter: :book:`Automatic differentiation <chapters/02-autodiff.html>`.
+
 Example:
     >>> from glassnn import Tensor
     >>> x = Tensor(3.0, requires_grad=True)
@@ -580,9 +582,8 @@ class Tensor:
             grad = grads.pop(node)
             if node.is_leaf or node._retains_grad:
                 node._accumulate_grad(grad)
-            if node.is_leaf:
+            if node._backward is None:  # a leaf: nothing further back
                 continue
-            assert node._backward is not None
             for parent, parent_grad in zip(
                 node._parents, node._backward(grad), strict=True
             ):

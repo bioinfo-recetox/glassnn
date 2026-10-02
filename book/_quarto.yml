@@ -1,6 +1,8 @@
 project:
   type: book
   output-dir: _book
+  # Run every chapter from book/, so that `from _helpers import ...` works.
+  execute-dir: project
 
 book:
   title: "GlassNN"
@@ -10,6 +12,10 @@ book:
   repo-subdir: book
   chapters:
     - index.qmd
+    - part: "Foundations"
+      chapters:
+        - chapters/01-introduction.qmd
+        - chapters/02-autodiff.qmd
     - references.qmd
 
 bibliography: ../docs/references.bib
@@ -24,4 +30,6 @@ format:
   html:
     theme: cosmo
     html-math-method: mathjax
+    code-tools: false
+    callout-appearance: default
     number-sections: true

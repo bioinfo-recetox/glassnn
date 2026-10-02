@@ -12,6 +12,8 @@ with a numerical estimate. For a function :math:`f` and a small step
 has error :math:`O(\varepsilon^2)`, against :math:`O(\varepsilon)` for the
 one-sided difference :cite:p:`griewank2008evaluating`. Rounding error grows
 like :math:`1/\varepsilon`, so the check needs float64.
+
+Book chapter: :book:`Automatic differentiation <chapters/02-autodiff.html>`.
 """
 
 from collections.abc import Callable, Sequence
@@ -138,6 +140,6 @@ def _compare(
     worst = np.unravel_index(np.argmax(excess), excess.shape)
     raise GradcheckError(
         f"Gradient mismatch for input {index} at element {tuple(map(int, worst))}: "
-        f"backward gives {analytic[worst]!r}, finite differences give "
-        f"{numeric[worst]!r}."
+        f"backward gives {float(analytic[worst]):.10g}, finite differences give "
+        f"{float(numeric[worst]):.10g}."
     )

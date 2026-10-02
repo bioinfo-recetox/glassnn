@@ -1,0 +1,422 @@
+# Automatic differentiation {#sec-autodiff}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Represent a computation as a graph and apply the chain rule on that graph.
+- Explain the difference between forward and reverse mode, and why training
+  uses reverse mode (backpropagation).
+- Read the backward code of GlassNN: adjoints, vector-Jacobian products,
+  broadcasting and the topological order.
+- Verify gradients with central finite differences, and choose the step size.
+
+## Theory
+
+### Computational graphs
+
+Every computation on tensors is a composition of a few elementary operations.
+Take
+
+$$
+f(x, y) = x y + x^2 .
+$$ {#eq-example}
+
+Naming the intermediate results gives the sequence $a = x y$, $b = x^2$,
+$f = a + b$, or as a directed acyclic graph whose nodes are values and whose
+edges say "is used to compute":
+
+```{mermaid}
+flowchart LR
+  x((x)) --> a((a = x·y))
+  y((y)) --> a
+  x --> b((b = x²))
+  a --> f((f = a + b))
+  b --> f
+```
+
+The variable $x$ is used twice; we come back to this below.
+
+### The chain rule on a graph
+
+Let $L$ be a scalar computed from the graph; in training, $L$ is the loss. For
+every node $z$ define its **adjoint**
+
+$$
+\bar z = \frac{\partial L}{\partial z},
+$$ {#eq-adjoint}
+
+which has the same shape as $z$. If $z = g(a, b)$ and $z$ is used only to
+compute later nodes, the chain rule gives the adjoints of the inputs from the
+adjoint of the output:
+
+$$
+\bar a = J_a^\top \bar z, \qquad \bar b = J_b^\top \bar z,
+$$ {#eq-vjp}
+
+where $J_a = \partial z / \partial a$ is the Jacobian of $g$ with respect to
+$a$. The product $J^\top \bar z$, or $\bar z^\top J$ as a row vector, is a
+**vector-Jacobian product** (VJP). The Jacobian itself is never formed: each
+operation knows how to compute its VJP directly. Some examples, with $\odot$
+the elementwise product:
+
+| operation | forward | backward (VJP) |
+|---|---|---|
+| sum | $z = a + b$ | $\bar a = \bar z$, $\bar b = \bar z$ |
+| product | $z = a \odot b$ | $\bar a = \bar z \odot b$, $\bar b = \bar z \odot a$ |
+| exponential | $z = e^{a}$ | $\bar a = \bar z \odot z$ |
+| matrix product | $Z = A B$ | $\bar A = \bar Z B^\top$, $\bar B = A^\top \bar Z$ |
+| sum of elements | $z = \sum_i a_i$ | $\bar a_i = \bar z$ |
+
+The matrix product rule follows from writing the product with indices,
+$Z_{ij} = \sum_k A_{ik} B_{kj}$: since $\partial Z_{ij} / \partial A_{ik} = B_{kj}$,
+
+$$
+\bar A_{ik} = \sum_j \bar Z_{ij} B_{kj} = (\bar Z B^\top)_{ik} .
+$$ {#eq-matmul-vjp}
+
+### Several uses: adjoints add up
+
+A node used by several later nodes influences $L$ along several paths. The
+multivariate chain rule sums the contributions of all paths: in
+@eq-example, $x$ feeds both $a$ and $b$, so
+
+$$
+\bar x = \underbrace{\bar a \, y}_{\text{through } a}
+       + \underbrace{\bar b \, 2x}_{\text{through } b}
+       = y + 2x ,
+$$ {#eq-fanout}
+
+because $\bar a = \bar b = \bar f = 1$. An implementation must therefore
+*accumulate* adjoints, and may pass a node's adjoint on only when all of its
+users have contributed. Visiting the nodes in **reverse topological order**
+(every node after all nodes that use it) guarantees exactly that.
+
+### Forward and reverse mode
+
+The chain rule can be applied in two directions
+[@baydin2018automatic; @griewank2008evaluating]. For
+$f: \mathbb{R}^n \to \mathbb{R}^m$ written as a composition
+$f = f_K \circ \dots \circ f_1$, the Jacobian is the product
+
+$$
+J_f = J_K \, J_{K-1} \cdots J_1 .
+$$ {#eq-chain}
+
+- **Forward mode** multiplies from the right: it pushes a direction
+  $\dot x \in \mathbb{R}^n$ through the computation together with the values
+  (Jacobian-vector products). One pass gives one column of $J_f$; the full
+  Jacobian needs $n$ passes.
+- **Reverse mode** multiplies from the left: it first evaluates $f$ and
+  stores the intermediate values, then pushes an adjoint
+  $\bar y \in \mathbb{R}^m$ backwards (vector-Jacobian products, @eq-vjp).
+  One pass gives one row of $J_f$; the full Jacobian needs $m$ passes.
+
+Training a network means differentiating a *scalar* loss ($m = 1$) with
+respect to many parameters ($n$ is thousands to billions). Reverse mode gives
+the whole gradient in one backward pass, at a cost that is a small constant
+multiple of evaluating the loss, at the price of storing the intermediate
+values of the forward pass. Applied to neural networks, reverse mode is
+**backpropagation** [@rumelhart1986learning; @goodfellow2016deep, sec. 6.5].
+
+### Broadcasting
+
+Binary operations *broadcast*: in `a + b` with `a` of shape `(3, 4)` and `b`
+of shape `(4,)`, the vector `b` is used for each of the 3 rows. Broadcasting
+is a hidden copy, and a copied value receives the sum of the adjoints of its
+copies (@eq-fanout):
+
+$$
+z_{ij} = a_{ij} + b_j
+\quad\Longrightarrow\quad
+\bar b_j = \sum_i \bar z_{ij} .
+$$ {#eq-broadcast}
+
+In general, the adjoint of a broadcast operand is summed over the axes that
+broadcasting added in front, and over the axes where the operand had size 1.
+
+### Checking gradients numerically
+
+A bug in a backward function gives wrong gradients but no error message, so
+each operation must be tested against an independent estimate. Taylor
+expansion around $x$ gives the **central difference**
+
+$$
+\frac{f(x + \varepsilon) - f(x - \varepsilon)}{2 \varepsilon}
+= f'(x) + \frac{\varepsilon^2}{6} f'''(\xi) ,
+$$ {#eq-central}
+
+with truncation error $O(\varepsilon^2)$; the one-sided difference
+$(f(x + \varepsilon) - f(x)) / \varepsilon$ has error $O(\varepsilon)$.
+Making $\varepsilon$ small does not help indefinitely: $f(x \pm \varepsilon)$
+are rounded with relative error $u$ (@eq-rounding), and dividing by
+$2\varepsilon$ amplifies that rounding error to about $u |f| / \varepsilon$.
+The total error
+
+$$
+E(\varepsilon) \approx \frac{\varepsilon^2}{6} |f'''| + \frac{u |f|}{\varepsilon}
+$$ {#eq-fd-error}
+
+is smallest near $\varepsilon \approx u^{1/3}$. For $f = e^x$ at $x = 1$ this
+is $\varepsilon \approx 5 \times 10^{-6}$ in float64 and
+$\varepsilon \approx 4 \times 10^{-3}$ in float32; the measured errors at
+these steps are about $3 \times 10^{-11}$ and $1 \times 10^{-5}$
+(@fig-fd-error; @eq-fd-error is an upper estimate, rounding errors partly
+cancel). In float32 the check cannot separate a small
+bug from rounding, so gradient checks run in float64.
+
+For an operation with a tensor output $y$, GlassNN checks the scalar
+$L = \sum_k w_k y_k$ with fixed weights $w_k = \cos k$. Its gradient is the
+VJP $w^\top J$, which is exactly what the backward pass computes; the weights
+have mixed signs and different sizes, so errors in different elements cannot
+cancel.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+Everything in this chapter is in `{python} api_link("glassnn.tensor")`. Every
+operation follows the same pattern: compute the output, define a `backward`
+function that maps the output adjoint to the input adjoints (@eq-vjp), and
+hand both to `_result`, which records the node only if some input requires
+gradients. The product, line by line the table above:
+
+```{python}
+#| echo: false
+show_source("glassnn.Tensor.__mul__")
+```
+
+`_result` builds the graph node (`{python} src_link("glassnn.tensor._result")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.tensor._result")
+```
+
+`_unbroadcast` implements @eq-broadcast
+(`{python} src_link("glassnn.tensor._unbroadcast")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.tensor._unbroadcast")
+```
+
+`backward` visits the nodes in reverse topological order and accumulates the
+adjoints in a dictionary (@eq-fanout); only leaves, and tensors marked with
+`retain_grad()`, store their adjoint in `.grad`
+(`{python} src_link("glassnn.Tensor.backward")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.Tensor.backward")
+```
+
+The order comes from an iterative depth-first search; it uses a stack
+instead of recursion, so a chain of 10,000 operations does not hit Python's
+recursion limit:
+
+```{python}
+#| echo: false
+show_source("glassnn.Tensor._topological_order")
+```
+
+The gradient check of @eq-central is
+`{python} api_link("glassnn.gradcheck.gradcheck")`
+(`{python} src_link("glassnn.gradcheck.gradcheck")`).
+
+`{python} see_also("glassnn.Tensor", "glassnn.no_grad", "glassnn.gradcheck.gradcheck")`
+:::
+
+::: {.callout-warning title="Differences from PyTorch"}
+- GlassNN keeps the graph after `backward()`, so calling it twice works;
+  PyTorch frees the graph unless `retain_graph=True` is passed.
+- There are no in-place operations: `x += 1` and `x[0] = 1` raise
+  `NotImplementedError`.
+- A recorded tensor shows its operation as `op='mul'`; PyTorch shows
+  `grad_fn=<MulBackward0>`.
+:::
+
+## Try it
+
+The example of @eq-example: $\partial f / \partial x = y + 2x = 10$ and
+$\partial f / \partial y = x = 3$ at $(x, y) = (3, 4)$.
+
+```{python}
+import numpy as np
+
+from glassnn import Tensor, backend, no_grad
+from glassnn.gradcheck import gradcheck
+
+x = Tensor(3.0, requires_grad=True)
+y = Tensor(4.0, requires_grad=True)
+a = x * y
+a.retain_grad()          # keep the adjoint of an intermediate node
+f = a + x**2
+f.backward()
+x.grad, y.grad, a.grad
+```
+
+Gradients **accumulate** in `.grad`, as in PyTorch: a second backward pass
+adds to them. This is why training loops reset gradients before each step.
+
+```{python}
+f.backward()
+x.grad
+```
+
+Broadcasting (@eq-broadcast): the adjoint of `b` is the column sum of the
+adjoint of the output.
+
+```{python}
+A = Tensor(np.arange(12.0).reshape(3, 4), requires_grad=True)
+b = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+z = A * b
+z.backward(np.ones((3, 4)))
+b.grad, A.grad
+```
+
+Inside `no_grad()` nothing is recorded; use it for evaluation and for
+parameter updates.
+
+```{python}
+with no_grad():
+    w = x * 2
+w.requires_grad, w.is_leaf
+```
+
+### Gradient checks
+
+Gradient checks run in float64.
+
+```{python}
+backend.set_default_dtype("float64")
+rng = np.random.default_rng(0)
+A = Tensor(rng.normal(size=(3, 4)), requires_grad=True)
+B = Tensor(rng.normal(size=(4, 2)), requires_grad=True)
+gradcheck(lambda s, t: (s @ t).exp(), [A, B])
+```
+
+A wrong backward function is caught. Here is the square with the derivative
+$3a$ instead of $2a$, built with the same `_result` helper as the real
+operations:
+
+```{python}
+from glassnn.gradcheck import GradcheckError
+from glassnn.tensor import _result
+
+def wrong_square(a):
+    return _result(a.data**2, (a,), lambda grad: (grad * 3 * a.data,), "wrong_square")
+
+try:
+    gradcheck(wrong_square, [Tensor(rng.normal(size=3), requires_grad=True)])
+except GradcheckError as error:
+    print(error)
+```
+
+The error of the central difference (@eq-fd-error) for $f(x) = e^x$ at
+$x = 1$, in float32 and float64:
+
+```{python}
+#| label: fig-fd-error
+#| fig-cap: "Error of the central difference for the derivative of $e^x$ at $x = 1$. The dashed lines mark $\\varepsilon = u^{1/3}$."
+import matplotlib.pyplot as plt
+
+steps = np.logspace(-12, -1, 100)
+fig, ax = plt.subplots(figsize=(6, 3.5))
+for dtype in (np.float32, np.float64):
+    x0, h = dtype(1.0), steps.astype(dtype)
+    estimate = (np.exp(x0 + h) - np.exp(x0 - h)) / (2 * h)
+    ax.loglog(steps, np.abs(estimate.astype(np.float64) - np.e), label=dtype.__name__)
+    ax.axvline((np.finfo(dtype).eps / 2) ** (1 / 3), linestyle="--", color="gray")
+ax.set_xlabel(r"step $\varepsilon$")
+ax.set_ylabel("absolute error")
+ax.legend()
+plt.show()
+backend.set_default_dtype("float32")
+```
+
+## Exercises
+
+::: {.callout-tip title="Exercise 2.1: a new operation"}
+Write a function `sqrt(a)` that returns $\sqrt{a}$ as a recorded operation,
+using `_result` as `wrong_square` does above. Derive its backward function
+first, then verify it with `gradcheck` on positive inputs.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+For $z = \sqrt a$, $\partial z / \partial a = 1 / (2 \sqrt a)$, so
+$\bar a = \bar z / (2 z)$.
+
+```{python}
+backend.set_default_dtype("float64")
+
+def sqrt(a):
+    out = np.sqrt(a.data)
+    return _result(out, (a,), lambda grad: (grad / (2 * out),), "sqrt")
+
+gradcheck(sqrt, [Tensor(rng.uniform(0.5, 2.0, size=5), requires_grad=True)])
+```
+
+```{python}
+#| include: false
+backend.set_default_dtype("float32")
+```
+:::
+
+::: {.callout-tip title="Exercise 2.2: forward or reverse"}
+A model maps 1,000 inputs to 10 outputs. How many passes does each mode need
+to compute the full Jacobian? Which mode does a training loop with a scalar
+loss use, and how many passes does it need per step?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+Forward mode: 1,000 passes (one per input). Reverse mode: 10 passes (one per
+output). Training differentiates a scalar loss, so reverse mode needs a
+single backward pass per step.
+:::
+
+::: {.callout-tip title="Exercise 2.3: why no in-place operations"}
+The backward function of `__mul__` reads `a.data` and `b.data` when it runs,
+after the forward pass. What would go wrong if `x *= 2` changed `x.data` in
+place between the forward and the backward pass?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The backward function would use the *new* values of `x.data`, so every
+gradient that depends on `x` would be silently wrong. PyTorch detects such
+cases with version counters on tensors; GlassNN avoids them by forbidding
+in-place operations.
+:::
+
+::: {.callout-tip title="Exercise 2.4: the mean"}
+`Tensor.mean` has no backward function of its own. Read its source, derive
+$\bar a$ for $z = \frac{1}{n} \sum_i a_i$, and confirm with
+`x.mean().backward()` on a tensor of 4 elements.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+`mean` is `sum` followed by a division by $n$, so the graph has two nodes and
+$\bar a_i = \bar z / n = 1/4$.
+
+```{python}
+v = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+v.mean().backward()
+v.grad
+```
+:::
+
+## Notes and references
+
+- This chapter supports lecture 10 of *Advanced Machine Learning* (training and
+  generalization: backpropagation).
+- Backpropagation for neural networks: @rumelhart1986learning; a textbook
+  treatment in @goodfellow2016deep, section 6.5.
+- Automatic differentiation in general, including forward mode and its uses:
+  the survey @baydin2018automatic and the monograph @griewank2008evaluating.
+- The idea of a tiny, readable autograd engine for teaching goes back to
+  Andrej Karpathy's *micrograd* (MIT license); GlassNN's code is written
+  independently and works on arrays rather than scalars.
