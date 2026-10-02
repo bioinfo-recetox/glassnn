@@ -296,5 +296,10 @@ Software
 | 10 | Motif generator | a small copy of the lecture-5 generator lives in `examples/` |
 | 11 | In-place exceptions | `nn.init.*_`, `clip_grad_norm_` and `Optimizer.step()` modify parameter data in place by design; documented as the only exceptions |
 | 12 | Quarto | pinned to 1.10.18 in CI |
+| 13 | Gradients kept | leaf tensors only; `retain_grad()` keeps an intermediate gradient (as in PyTorch) |
+| 14 | Type of `.grad` | a `Tensor` with `requires_grad=False` (as in PyTorch) |
+| 15 | dtype of new tensors | floating input (lists, scalars, arrays of any float dtype) is cast to the default dtype unless `dtype=` is given; integer and boolean input keeps its dtype. Differs from PyTorch, which keeps the dtype of a NumPy array |
+| 16 | Elementwise ops in M1 | `exp` and `log` are `Tensor` methods from M1 on |
+| 17 | Graph after `backward` | kept (a second `backward` works without `retain_graph`); documented as a difference from PyTorch |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.

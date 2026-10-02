@@ -11,4 +11,7 @@ try:
 except PackageNotFoundError:  # running from a source tree that is not installed
     __version__ = "0.0.0"
 
-__all__ = ["__version__"]
+from glassnn import backend
+from glassnn.tensor import Tensor, no_grad
+
+__all__ = ["Tensor", "__version__", "backend", "no_grad"]
