@@ -1,0 +1,103 @@
+[build-system]
+requires = ["hatchling>=1.27", "hatch-vcs>=0.5"]
+build-backend = "hatchling.build"
+
+[project]
+name = "glassnn"
+dynamic = ["version"]
+description = "A transparent neural-network library for teaching."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Vlad Popovici" }]
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.5",
+    "scipy>=1.18",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/bioinfo-recetox/glassnn"
+Documentation = "https://bioinfo-recetox.github.io/glassnn/"
+
+[project.optional-dependencies]
+# CuPy 14.2.0 requires numpy<2.6; re-check before widening (PLAN.md, section 2).
+gpu = ["cupy-cuda13x>=14", "numpy<2.6"]
+dev = [
+    "pytest>=9",
+    "pytest-cov>=7",
+    "ruff>=0.16",
+    "pyright>=1.1.400",
+    "pre-commit>=4",
+]
+docs = [
+    "sphinx>=9",
+    "sphinxcontrib-bibtex>=2.7",
+]
+book = [
+    "quarto-cli==1.10.18",
+    "ipykernel>=6",
+    "nbformat>=5",
+    "nbclient>=0.10",
+    "pyyaml>=6",
+    "matplotlib>=3.10",
+]
+examples = [
+    "ipykernel>=6",
+    "matplotlib>=3.10",
+]
+
+[tool.hatch.version]
+source = "vcs"
+# Used only when building outside a git checkout (e.g. from an sdist without metadata).
+raw-options = { fallback_version = "0.0.0" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glassnn"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "src"]
+addopts = "--doctest-modules -m 'not torch and not gpu'"
+markers = [
+    "torch: cross-checks against PyTorch (needs torch installed)",
+    "gpu: CuPy backend parity tests (needs CuPy and a GPU)",
+]
+
+[tool.coverage.run]
+source = ["glassnn"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+extend-exclude = ["book/_book", "book/.quarto", "docs/_build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "D", "NPY", "RUF"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+"docs/conf.py" = ["D"]
+"book/**" = ["D"]
+"examples/**" = ["D"]
+"benchmarks/**" = ["D"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"

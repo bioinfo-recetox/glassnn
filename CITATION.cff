@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use GlassNN in teaching or research, please cite it as below."
+title: "GlassNN: a transparent teaching library for neural networks"
+type: software
+license: MIT
+repository-code: "https://github.com/bioinfo-recetox/glassnn"
+authors:
+  - family-names: Popovici
+    given-names: Vlad
+    affiliation: "RECETOX - Faculty of Science, Masaryk University"
