@@ -8,7 +8,7 @@ from glassnn.tensor import Tensor
 
 
 class RMSprop(Optimizer):
-    r"""RMSprop :cite:p:`tieleman2012lecture`.
+    r"""RMSprop :cite:p:`hinton2012lecture`.
 
     Divides the gradient by a running root mean square of recent gradients:
 

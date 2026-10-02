@@ -29,6 +29,8 @@ jobs:
         run: uv run sphinx-build -W docs docs/_build/html
       - name: Render book (executes every chapter)
         run: uv run quarto render book
+      - name: Check links from the book to the API reference
+        run: uv run python book/_check_api_links.py
       - name: Assemble site
         run: |
           mkdir -p site

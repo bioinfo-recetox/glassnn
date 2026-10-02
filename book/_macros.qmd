@@ -2,5 +2,7 @@
 ::: {.hidden}
 $$
 \newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\operatorname{Var}}
 $$
 :::

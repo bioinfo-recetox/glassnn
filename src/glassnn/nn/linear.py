@@ -26,7 +26,8 @@ class Linear(Module):
         bias: :math:`b`, shape ``(out_features,)``, or ``None``.
 
     Shapes:
-        input ``(..., in_features)`` to output ``(..., out_features)``.
+        input: ``(..., in_features)``.
+        output: ``(..., out_features)``.
 
     The initialization is PyTorch's: :math:`W` from
     ``kaiming_uniform_(a=sqrt(5))``, which is uniform on

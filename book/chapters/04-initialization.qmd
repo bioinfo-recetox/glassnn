@@ -1,0 +1,376 @@
+# Initialization and the flow of signals {#sec-initialization}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Compute how the variance of a signal changes through a linear layer, in
+  the forward and in the backward pass.
+- Derive the Xavier (Glorot) and Kaiming (He) initializations from the
+  requirement that this variance stays constant.
+- Observe vanishing and exploding activations and gradients in deep
+  networks.
+- Initialize the layers of a model with `nn.init`.
+
+## Theory
+
+### Variance through one layer
+
+Consider one unit of a layer, $z = \sum_{i=1}^{n} w_i h_i$, with
+$n = n_\text{in}$ inputs. At initialization the weights are independent,
+with mean 0 and variance $\sigma_w^2$, and independent of the inputs. Then
+$\E[z] = 0$ and
+
+$$
+\Var(z) = \sum_{i=1}^{n} \E[w_i^2]\, \E[h_i^2] = n\, \sigma_w^2\, \E[h^2] .
+$$ {#eq-var-forward}
+
+The second moment $\E[h^2]$ of the inputs depends on the previous
+nonlinearity:
+
+- **tanh** is close to the identity near 0, so for small pre-activations
+  $\E[h^2] \approx \Var(z_\text{prev})$;
+- **ReLU** sets the negative half to 0. For a pre-activation symmetric
+  around 0, $\E[\operatorname{relu}(z)^2] = \frac12 \E[z^2] = \frac12 \Var(z)$.
+
+In a deep network @eq-var-forward is applied once per layer, so the variance
+is multiplied by the factor $n \sigma_w^2$ (tanh) or $\frac12 n \sigma_w^2$
+(ReLU) at every layer. Unless this factor is 1, the signal shrinks or
+grows *exponentially with depth*.
+
+### The backward pass
+
+By @eq-backprop the adjoints flow through the transposed weights,
+$\bar h_i = \sum_{j} w_{ji}\, \bar z_j$, a sum over the $n_\text{out}$ units
+that use $h_i$. The same argument gives
+
+$$
+\Var(\bar h) = n_\text{out}\, \sigma_w^2\, \E[\bar z^2] ,
+$$ {#eq-var-backward}
+
+so gradients shrink or explode with depth unless $n_\text{out} \sigma_w^2$
+(times the nonlinearity's factor) is 1. Gradients that vanish in the first
+layers mean that those layers barely learn.
+
+### Xavier and Kaiming
+
+Keeping the forward variance constant needs
+$\sigma_w^2 = 1 / n_\text{in}$; keeping the backward variance constant needs
+$\sigma_w^2 = 1 / n_\text{out}$. **Xavier** (or Glorot) initialization
+[@glorot2010understanding] takes the compromise
+
+$$
+\sigma_w^2 = \frac{2}{n_\text{in} + n_\text{out}} ,
+$$ {#eq-xavier}
+
+designed for tanh and sigmoid networks. For ReLU, the factor $\frac12$
+must be compensated: **Kaiming** (or He) initialization [@he2015delving]
+takes
+
+$$
+\sigma_w^2 = \frac{2}{n_\text{in}} \quad(\text{mode } \texttt{fan\_in}),
+\qquad\text{or}\qquad
+\sigma_w^2 = \frac{2}{n_\text{out}} \quad(\text{mode } \texttt{fan\_out}) .
+$$ {#eq-kaiming}
+
+Libraries write both as $\sigma_w = g \sqrt{\cdot}$ with a **gain** $g$ per
+nonlinearity: 1 for linear and sigmoid, $\sqrt 2$ for ReLU, $5/3$ for tanh
+(an empirical value that compensates the contraction of tanh). A uniform
+distribution on $[-b, b]$ has variance $b^2/3$, so the uniform variants use
+$b = \sqrt 3\, \sigma_w$.
+
+The default of `Linear` in GlassNN and PyTorch is the uniform distribution
+on $[-1/\sqrt{n_\text{in}}, 1/\sqrt{n_\text{in}}]$, i.e.
+$\sigma_w^2 = 1 / (3 n_\text{in})$, a third of the variance that keeps a
+linear network stable. It works well for shallow networks, but
+@eq-var-forward predicts that it shrinks the signal in deep ones
+(Exercise 4.2).
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+The initializers are in `{python} api_link("glassnn.nn.init")`. Each one
+computes $\sigma_w$ or $b$ from the shape of the weight and overwrites
+`tensor.data` (the trailing underscore marks the in-place change, as in
+PyTorch). The fan-in and fan-out of a weight of shape
+`(out, in, *kernel)` (`{python} src_link("glassnn.nn.init._calculate_fan_in_and_fan_out")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.init._calculate_fan_in_and_fan_out")
+```
+
+Kaiming initialization, @eq-kaiming with the gain:
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.init._kaiming_std")
+```
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.init.kaiming_normal_")
+```
+
+The default of `Linear` (`{python} src_link("glassnn.nn.Linear.reset_parameters")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.Linear.reset_parameters")
+```
+
+`{python} see_also("glassnn.nn.init.xavier_uniform_", "glassnn.nn.init.kaiming_uniform_", "glassnn.nn.init.calculate_gain", "glassnn.nn.Module.apply")`
+:::
+
+## Try it
+
+A deep MLP of width 256 and depth 20, applied to random inputs. The helper
+records the standard deviation of the pre-activations $Z_l$ at every layer.
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, manual_seed, nn, no_grad
+from glassnn.nn import init
+
+WIDTH, DEPTH = 256, 20
+
+
+def deep_mlp(nonlinearity, initializer):
+    layers = [nn.Linear(WIDTH, WIDTH) for _ in range(DEPTH)]
+    for layer in layers:
+        initializer(layer.weight)
+        init.zeros_(layer.bias)
+    return layers, nonlinearity
+
+
+def preactivation_stds(layers, nonlinearity, x):
+    stds = []
+    with no_grad():
+        h = x
+        for layer in layers:
+            z = layer(h)
+            stds.append(float(z.data.std()))
+            h = nonlinearity(z)
+    return stds
+
+
+manual_seed(0)
+x = Tensor(np.random.default_rng(0).normal(size=(512, WIDTH)))
+initializers = {
+    "too small, N(0, 0.01²)": lambda w: init.normal_(w, std=0.01),
+    "default of Linear": lambda w: init.kaiming_uniform_(w, a=np.sqrt(5)),
+    "Xavier normal": init.xavier_normal_,
+    "Kaiming normal (relu)": lambda w: init.kaiming_normal_(w, nonlinearity="relu"),
+    "too large, N(0, 0.1²)": lambda w: init.normal_(w, std=0.1),
+}
+```
+
+```{python}
+#| label: fig-init-forward
+#| fig-cap: "Standard deviation of the pre-activations through a 20-layer MLP of width 256, for ReLU (left) and tanh (right), with different initializations."
+fig, axes = plt.subplots(1, 2, figsize=(9, 3.5), sharey=True)
+for ax, (title, nonlinearity) in zip(axes, [("ReLU", F.relu), ("tanh", F.tanh)]):
+    for label, initializer in initializers.items():
+        stds = preactivation_stds(*deep_mlp(nonlinearity, initializer), x)
+        ax.semilogy(range(1, DEPTH + 1), stds, marker=".", label=label)
+    ax.set_title(title)
+    ax.set_xlabel("layer $l$")
+axes[0].set_ylabel("std of $Z_l$")
+axes[1].legend(fontsize=7)
+plt.show()
+```
+
+With ReLU, only Kaiming keeps the signal at a constant scale; the other
+initializations shrink or grow it by a constant factor per layer, as
+@eq-var-forward predicts. With tanh, large signals saturate instead of
+exploding (tanh is bounded), and Xavier keeps a stable, though slowly
+decaying, scale.
+
+The backward pass behaves in the same way (@eq-var-backward). Here the
+adjoint of the last layer's output is set to unit-variance noise, and
+`retain_grad()` keeps the adjoints $\bar Z_l$ of all pre-activations of a
+ReLU network:
+
+```{python}
+#| label: fig-init-backward
+#| fig-cap: "Standard deviation of the adjoints of the pre-activations in a 20-layer ReLU MLP, for unit-variance noise as the adjoint of the output."
+fig, ax = plt.subplots(figsize=(6, 3.5))
+noise = np.random.default_rng(1).normal(size=(512, WIDTH))
+for label, initializer in initializers.items():
+    layers, nonlinearity = deep_mlp(F.relu, initializer)
+    h, preactivations = x, []
+    for layer in layers:
+        z = layer(h)
+        z.retain_grad()
+        preactivations.append(z)
+        h = nonlinearity(z)
+    preactivations[-1].backward(noise)
+    stds = [float(z.grad.data.std()) for z in preactivations]
+    ax.semilogy(range(1, DEPTH + 1), stds, marker=".", label=label)
+ax.set_xlabel("layer $l$")
+ax.set_ylabel(r"std of $\bar Z_l$")
+ax.legend(fontsize=7)
+plt.show()
+```
+
+Now the signal travels from layer 20 down to layer 1, and shrinks or grows
+by a constant factor per layer except with Kaiming initialization. The
+gradient of a weight, $\bar W_l = \bar Z_l^\top H_{l-1}$, multiplies a
+backward signal that changes from the top and a forward signal that changes
+from the bottom; in a network of constant width the two factors compensate,
+so all layers get weight gradients of the *same* scale, but that common
+scale is tiny or huge unless the initialization is right (Exercise 4.4).
+
+### Initializing a whole model
+
+`Module.apply` calls a function on every sub-module, which is the usual way
+to initialize a model:
+
+```{python}
+def kaiming_for_linear(module):
+    if isinstance(module, nn.Linear):
+        init.kaiming_normal_(module.weight, nonlinearity="relu")
+        init.zeros_(module.bias)
+
+model = nn.Sequential(nn.Linear(2, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 2))
+model.apply(kaiming_for_linear)
+[(name, round(float(p.data.std()), 3)) for name, p in model.named_parameters()]
+```
+
+## Exercises
+
+::: {.callout-tip title="Exercise 4.1: ReLU halves the second moment"}
+Show that $\E[\operatorname{relu}(z)^2] = \frac12 \E[z^2]$ for any $z$ with a
+distribution symmetric around 0, and check it numerically for a normal and a
+uniform $z$.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$\operatorname{relu}(z)^2 = z^2 [z > 0]$, and by symmetry
+$\E[z^2 [z > 0]] = \E[z^2 [z < 0]]$; the two add up to $\E[z^2]$.
+
+```{python}
+generator = np.random.default_rng(1)
+for z in (generator.normal(size=10**6), generator.uniform(-1, 1, size=10**6)):
+    print(np.mean(np.maximum(z, 0) ** 2) / np.mean(z**2))
+```
+:::
+
+::: {.callout-tip title="Exercise 4.2: the default of Linear in a deep ReLU network"}
+With $\sigma_w^2 = 1/(3 n_\text{in})$, by which factor does the standard
+deviation of the pre-activations change per ReLU layer? Predict the ratio
+between layers 20 and 1, and compare with @fig-init-forward.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The variance changes by $\frac12 n \sigma_w^2 = \frac16$ per layer, so the
+standard deviation by $1/\sqrt 6 \approx 0.41$; after 19 layers by
+$6^{-19/2} \approx 4 \times 10^{-8}$.
+
+```{python}
+stds = preactivation_stds(*deep_mlp(F.relu, initializers["default of Linear"]), x)
+print(stds[-1] / stds[0], 6 ** (-19 / 2))
+```
+:::
+
+::: {.callout-tip title="Exercise 4.3: does it matter for training?"}
+Train a 10-layer ReLU MLP of width 64 on the two-moons data of @sec-mlp,
+once with the default initialization and once with Kaiming normal, for 20
+epochs. Use plain SGD with `lr=0.05`, then Adam with `lr=0.01`. Compare the
+training losses after the first, fifth and last epoch.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+from sklearn.datasets import make_moons
+
+from glassnn import optim
+from glassnn.data import DataLoader
+
+X_moons, y_moons = make_moons(n_samples=700, noise=0.2, random_state=0)
+
+
+def train_deep(initialize, make_optimizer):
+    manual_seed(0)
+    layers = [nn.Linear(2, 64), nn.ReLU()]
+    for _ in range(8):
+        layers += [nn.Linear(64, 64), nn.ReLU()]
+    model = nn.Sequential(*layers, nn.Linear(64, 2))
+    if initialize:
+        model.apply(kaiming_for_linear)
+    optimizer = make_optimizer(model.parameters())
+    epoch_losses = []
+    for _ in range(20):
+        total = 0.0
+        for xb, yb in DataLoader(X_moons, y_moons, batch_size=32, shuffle=True):
+            optimizer.zero_grad()
+            loss = F.cross_entropy(model(xb), yb)
+            loss.backward()
+            optimizer.step()
+            total += loss.item() * len(yb)
+        epoch_losses.append(total / len(y_moons))
+    return epoch_losses
+
+
+for optimizer_name, make_optimizer in [
+    ("SGD ", lambda ps: optim.SGD(ps, lr=0.05)),
+    ("Adam", lambda ps: optim.Adam(ps, lr=0.01)),
+]:
+    for init_name, initialize in [("default", False), ("Kaiming", True)]:
+        losses = train_deep(initialize, make_optimizer)
+        print(f"{optimizer_name} {init_name:8s} epochs 1, 5, 20: "
+              f"{losses[0]:.3f} {losses[4]:.3f} {losses[-1]:.3f}")
+```
+
+With SGD, the default initialization never leaves the chance level
+$\ln 2 \approx 0.693$: the signal reaching the output is about
+$6^{-9/2} \approx 3 \times 10^{-4}$ of its input scale (Exercise 4.2), the
+output is nearly constant, and the gradients of the first layers vanish.
+Kaiming initialization trains normally. Adam rescales every coordinate's
+step to about $\eta$ whatever the size of its gradient
+(@sec-optimization), so it recovers from the poor initialization and both
+runs learn.
+:::
+
+::: {.callout-tip title="Exercise 4.4: weight gradients"}
+For the ReLU network with the default initialization of `Linear`, compute
+the norm $\lVert \bar W_l \rVert$ of every layer after the backward pass
+above. How do the norms change with $l$, and how large are they?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+for label in ("default of Linear", "Kaiming normal (relu)"):
+    layers, nonlinearity = deep_mlp(F.relu, initializers[label])
+    h = x
+    for layer in layers:
+        z = layer(h)
+        h = nonlinearity(z)
+    z.backward(noise)
+    norms = [float(np.sqrt((layer.weight.grad.data**2).sum())) for layer in layers]
+    print(f"{label:22s}", " ".join(f"{n:.0e}" for n in norms[::3]))
+```
+
+All layers get weight gradients of about the same norm, as argued above, but
+that norm is many orders of magnitude below the norm the same noise gives
+with Kaiming initialization: the forward signal reaching the top is tiny,
+and so is every product $\bar Z_l^\top H_{l-1}$.
+:::
+
+## Notes and references
+
+- This chapter supports lecture 10 of *Advanced Machine Learning*
+  (initialization).
+- Xavier initialization: @glorot2010understanding, who also measured
+  activations and gradients layer by layer, as in @fig-init-forward.
+  Kaiming initialization and the analysis for ReLU: @he2015delving.
+- Normalization layers (batch and layer normalization) make networks much
+  less sensitive to initialization; they are the subject of a later chapter.

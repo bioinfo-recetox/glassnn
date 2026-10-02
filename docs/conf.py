@@ -25,6 +25,8 @@ extensions = [
 # Google-style docstrings only (PLAN.md, section 6.1).
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False
+# "Shapes:" sections list tensor shapes, rendered like "Args:".
+napoleon_custom_sections = [("Shapes", "params_style")]
 
 autodoc_typehints = "description"
 autodoc_member_order = "bysource"

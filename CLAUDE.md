@@ -14,10 +14,12 @@
 ```
 uv sync --extra dev --extra docs --extra examples   # create .venv (not --all-extras: the gpu extra needs CUDA)
 uv run pytest                 # all tests except torch/gpu markers
-uv run pytest -m torch        # cross-checks against PyTorch (needs torch installed)
+uv pip install torch --index-url https://download.pytorch.org/whl/cpu   # once; `uv sync` removes it again
+uv run pytest -m torch        # cross-checks against PyTorch
 uv run pytest -m gpu          # CuPy parity tests (needs CuPy and a GPU)
 uv run ruff check . && uv run ruff format --check .
 uv run sphinx-build -W docs docs/_build/html
+uv run quarto render book && uv run python book/_check_api_links.py
 ```
 
 ## Conventions

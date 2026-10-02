@@ -1,0 +1,449 @@
+# Optimization: SGD, momentum, Adam and AdamW {#sec-optimization}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Explain gradient descent on a quadratic: the largest stable learning rate
+  and the role of the condition number.
+- Derive momentum, RMSprop and Adam as successive fixes of plain stochastic
+  gradient descent, including Adam's bias correction.
+- Distinguish L2 regularization from decoupled weight decay (Adam versus
+  AdamW).
+- Use mini-batches, learning-rate schedules and gradient clipping in a
+  training loop.
+
+## Theory
+
+### Gradient descent and its stochastic version
+
+Training minimizes the empirical risk
+$\mathcal L(\theta) = \frac1N \sum_{n=1}^{N} \ell_n(\theta)$ over the
+parameters $\theta$. **Gradient descent** repeats
+$\theta \leftarrow \theta - \eta \nabla \mathcal L(\theta)$ with learning
+rate $\eta$. Computing $\nabla \mathcal L$ needs a pass over all $N$
+samples; **stochastic gradient descent** (SGD) uses the mean gradient
+$g = \frac{1}{B} \sum_{n \in \mathcal B} \nabla \ell_n$ of a random
+mini-batch $\mathcal B$ of size $B$ instead. It is an unbiased estimate of
+$\nabla \mathcal L$, and its variance decreases like $1/B$; one *epoch* is
+one pass over the shuffled data in mini-batches [@goodfellow2016deep, chap. 8].
+
+### A quadratic model
+
+Near a minimum $\theta^*$, the loss is approximately quadratic,
+$\mathcal L(\theta) \approx \mathcal L(\theta^*) + \frac12 (\theta - \theta^*)^\top H (\theta - \theta^*)$,
+with the Hessian $H$ positive definite with eigenvalues
+$\lambda_\min \le \dots \le \lambda_\max$. The error
+$e_t = \theta_t - \theta^*$ of gradient descent then evolves as
+
+$$
+e_{t+1} = (I - \eta H)\, e_t ,
+$$ {#eq-gd-quadratic}
+
+so along the eigenvector of $\lambda_i$ it is multiplied by $1 - \eta \lambda_i$
+per step. Gradient descent converges if and only if
+$|1 - \eta \lambda_i| < 1$ for all $i$:
+
+$$
+0 < \eta < \frac{2}{\lambda_\max} .
+$$ {#eq-gd-stable}
+
+The learning rate is limited by the *steepest* direction, but progress
+along the *flattest* direction is only $\eta \lambda_\min$ per step. The best
+fixed rate, $\eta = 2/(\lambda_\max + \lambda_\min)$, shrinks the error by
+$(\kappa - 1)/(\kappa + 1)$ per step, where $\kappa = \lambda_\max / \lambda_\min$
+is the **condition number**: ill-conditioned problems (long narrow valleys)
+are slow.
+
+### Momentum
+
+**Momentum** (the "heavy ball") accumulates a velocity:
+
+$$
+b_t = \mu\, b_{t-1} + g_t, \qquad \theta_t = \theta_{t-1} - \eta\, b_t ,
+$$ {#eq-momentum}
+
+with $\mu \in [0, 1)$, typically 0.9. Along a consistent direction the
+steps add up to $\eta / (1 - \mu)$ times the gradient, ten times more for
+$\mu = 0.9$; across the valley, gradients of alternating sign cancel. On a
+quadratic, well-tuned momentum converges at a rate that depends on
+$\sqrt\kappa$ instead of $\kappa$. **Nesterov** momentum evaluates the
+correction as if the velocity step had already been taken; in the form used
+by PyTorch and GlassNN, the update is $\theta_t = \theta_{t-1} - \eta (g_t + \mu b_t)$
+[@sutskever2013importance].
+
+### Adaptive learning rates: RMSprop and Adam
+
+Momentum uses one learning rate for all coordinates. **RMSprop**
+[@hinton2012lecture] divides each coordinate of the gradient by a running
+root mean square of its recent values,
+
+$$
+v_t = \alpha\, v_{t-1} + (1 - \alpha)\, g_t^2, \qquad
+\theta_t = \theta_{t-1} - \eta\, \frac{g_t}{\sqrt{v_t} + \epsilon} ,
+$$ {#eq-rmsprop}
+
+so that coordinates with large gradients take smaller steps, and flat
+coordinates larger ones. **Adam** [@kingma2015adam] combines this with
+momentum: it keeps running means of the gradient and of its square,
+
+$$
+m_t = \beta_1 m_{t-1} + (1 - \beta_1) g_t, \qquad
+v_t = \beta_2 v_{t-1} + (1 - \beta_2) g_t^2 ,
+$$ {#eq-adam-moments}
+
+starting from $m_0 = v_0 = 0$. Unrolling the recursion,
+$m_t = (1 - \beta_1) \sum_{s=1}^{t} \beta_1^{t-s} g_s$; if the gradients
+have a constant mean $\E[g_s] = \gamma$, then
+
+$$
+\E[m_t] = (1 - \beta_1) \sum_{s=1}^{t} \beta_1^{t-s}\, \gamma = (1 - \beta_1^t)\, \gamma ,
+$$ {#eq-adam-bias}
+
+which is far from $\gamma$ for small $t$ (only $0.1\gamma$ at $t = 1$ with
+$\beta_1 = 0.9$). Adam therefore divides by $1 - \beta^t$:
+
+$$
+\hat m_t = \frac{m_t}{1 - \beta_1^t}, \qquad
+\hat v_t = \frac{v_t}{1 - \beta_2^t}, \qquad
+\theta_t = \theta_{t-1} - \eta\, \frac{\hat m_t}{\sqrt{\hat v_t} + \epsilon} .
+$$ {#eq-adam}
+
+Since $\hat m_t / \sqrt{\hat v_t}$ is about $\pm 1$ when the gradient keeps
+its sign, every coordinate moves by about $\eta$ per step, *whatever the
+scale of its gradient*. This makes Adam robust to badly scaled problems and
+to poor initializations, and is why $\eta = 10^{-3}$ is a reasonable default.
+
+### Weight decay: L2 versus decoupled
+
+The L2 penalty $\frac\lambda2 \lVert\theta\rVert^2$ adds $\lambda\theta$ to the
+gradient. For SGD this equals shrinking the weights before each step,
+$\theta \leftarrow (1 - \eta\lambda)\, \theta - \eta g$, hence the name
+*weight decay*. For Adam the two are **not** the same: the term
+$\lambda\theta$ added to $g_t$ is divided by $\sqrt{\hat v_t}$, so weights
+with large gradients are barely regularized. **AdamW**
+[@loshchilov2019decoupled] applies the decay directly,
+$\theta \leftarrow (1 - \eta\lambda)\, \theta$, before the Adam step, and
+usually generalizes better. In GlassNN, as in PyTorch, `Adam(weight_decay=λ)`
+is the L2 form and `AdamW(weight_decay=λ)` the decoupled form.
+
+Plain SGD is the slowest, momentum is clearly faster, and Adam reaches the
+lowest loss in the fewest epochs. Adam and AdamW are almost indistinguishable
+here: with $\lambda = 0.01$ the weights shrink by only
+$(1 - \eta\lambda)^{660} \approx 0.94$ in 660 steps, a small effect next to
+the gradient updates.
+
+### Schedules and clipping
+
+A constant learning rate is rarely best: large steps make fast progress at
+first, small steps settle into a minimum at the end. Common **schedules**
+divide $\eta$ by a factor every few epochs (step decay), or follow a half
+cosine from $\eta_0$ to $\eta_\min$ [@loshchilov2017sgdr]. A **warmup**
+increases $\eta$ linearly during the first steps; it avoids large updates
+while Adam's estimate $\hat v_t$ is still based on few gradients, and is
+standard for transformers. **Gradient clipping** rescales the gradient when
+its norm exceeds a threshold, which keeps the direction but limits the step
+size after a rare huge gradient.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+The optimizers are in `{python} api_link("glassnn.optim")`. Each `step`
+reads `p.grad` and replaces `p.data`; parameters without a gradient are
+skipped. SGD with momentum and Nesterov momentum, @eq-momentum
+(`{python} src_link("glassnn.optim.SGD.step")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.optim.SGD.step")
+```
+
+Adam and AdamW share one `step`, @eq-adam-moments and @eq-adam, and differ
+only in where the weight decay goes
+(`{python} src_link("glassnn.optim.Adam.step")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.optim.Adam.step")
+```
+
+Schedulers set `optimizer.lr` from a closed-form formula; the cosine
+schedule:
+
+```{python}
+#| echo: false
+show_source("glassnn.optim.CosineAnnealingLR.get_lr")
+```
+
+Mini-batches come from `{python} api_link("glassnn.data.DataLoader")`, which
+draws a new permutation every epoch:
+
+```{python}
+#| echo: false
+show_source("glassnn.data.DataLoader.__iter__")
+```
+
+`{python} see_also("glassnn.optim.RMSprop", "glassnn.optim.AdamW", "glassnn.optim.StepLR", "glassnn.optim.LinearWarmup", "glassnn.optim.clip_grad_norm_")`
+:::
+
+::: {.callout-warning title="Differences from PyTorch"}
+- An optimizer has one parameter group, and its learning rate is
+  `optimizer.lr` (PyTorch: `optimizer.param_groups[0]["lr"]`).
+- `clip_grad_norm_` is `glassnn.optim.clip_grad_norm_` (PyTorch:
+  `torch.nn.utils.clip_grad_norm_`), Euclidean norm only.
+- `LinearWarmup(opt, warmup_steps, start_factor)` is PyTorch's
+  `LinearLR(opt, start_factor, end_factor=1.0, total_iters=warmup_steps)`.
+- `DataLoader(X, y, ...)` takes arrays, not a `Dataset`.
+
+The update formulas are PyTorch's; the test suite checks five steps of
+every optimizer against PyTorch to $10^{-10}$ in float64.
+:::
+
+## Try it
+
+### An ill-conditioned quadratic
+
+The loss $\mathcal L(\theta) = \frac12 (\theta_1^2 + 25\, \theta_2^2)$ has
+$\kappa = 25$ and, by @eq-gd-stable, needs $\eta < 2/25 = 0.08$.
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, manual_seed, nn, no_grad, optim
+
+curvature = Tensor([1.0, 25.0])
+
+
+def trajectory(make_optimizer, steps=60):
+    theta = nn.Parameter([-4.5, 1.0])
+    optimizer = make_optimizer([theta])
+    path = [theta.data.copy()]
+    for _ in range(steps):
+        optimizer.zero_grad()
+        (0.5 * (curvature * theta**2).sum()).backward()
+        optimizer.step()
+        path.append(theta.data.copy())
+    return np.array(path)
+
+
+methods = {
+    "GD, η = 0.075": lambda ps: optim.SGD(ps, lr=0.075),
+    "momentum, η = 0.02, μ = 0.8": lambda ps: optim.SGD(ps, lr=0.02, momentum=0.8),
+    "Adam, η = 0.3": lambda ps: optim.Adam(ps, lr=0.3),
+}
+paths = {name: trajectory(make) for name, make in methods.items()}
+```
+
+```{python}
+#| label: fig-quadratic
+#| fig-cap: "Sixty steps of three optimizers on an ill-conditioned quadratic: paths (left) and loss (right)."
+fig, (left, right) = plt.subplots(1, 2, figsize=(10, 3.8))
+a, b = np.meshgrid(np.linspace(-5, 1.5, 200), np.linspace(-1.5, 1.5, 200))
+left.contour(a, b, 0.5 * (a**2 + 25 * b**2), levels=np.geomspace(0.01, 60, 15), colors="lightgray")
+for name, path in paths.items():
+    left.plot(path[:, 0], path[:, 1], marker=".", markersize=3, label=name)
+    right.semilogy(0.5 * (path[:, 0] ** 2 + 25 * path[:, 1] ** 2), label=name)
+left.set_xlabel(r"$\theta_1$")
+left.set_ylabel(r"$\theta_2$")
+right.set_xlabel("step")
+right.set_ylabel("loss")
+right.legend(fontsize=8)
+plt.show()
+```
+
+Gradient descent oscillates across the steep direction, because
+$1 - \eta \lambda_\max = 1 - 0.075 \cdot 25 = -0.875$, and creeps along the
+flat one ($1 - 0.075 = 0.925$ per step). Momentum damps the oscillation and
+accelerates along the valley. Adam moves both coordinates at a similar
+speed from the start, and then oscillates around the minimum at the scale of
+its learning rate.
+
+### Optimizers on two moons
+
+The MLP of @sec-mlp, trained for 30 epochs from the same initialization
+with four optimizers:
+
+```{python}
+from sklearn.datasets import make_moons
+
+from glassnn.data import DataLoader
+
+X, y = make_moons(n_samples=700, noise=0.2, random_state=0)
+
+
+def train(make_optimizer, epochs=30):
+    manual_seed(0)
+    model = nn.Sequential(nn.Linear(2, 32), nn.ReLU(), nn.Linear(32, 32), nn.ReLU(), nn.Linear(32, 2))
+    optimizer = make_optimizer(model.parameters())
+    loader = DataLoader(X, y, batch_size=32, shuffle=True)
+    epoch_losses = []
+    for _ in range(epochs):
+        total = 0.0
+        for xb, yb in loader:
+            optimizer.zero_grad()
+            loss = F.cross_entropy(model(xb), yb)
+            loss.backward()
+            optimizer.step()
+            total += loss.item() * len(yb)
+        epoch_losses.append(total / len(y))
+    return epoch_losses
+
+
+runs = {
+    "SGD, η = 0.1": lambda ps: optim.SGD(ps, lr=0.1),
+    "SGD + momentum 0.9, η = 0.1": lambda ps: optim.SGD(ps, lr=0.1, momentum=0.9),
+    "Adam, η = 0.01": lambda ps: optim.Adam(ps, lr=0.01),
+    "AdamW, η = 0.01, λ = 0.01": lambda ps: optim.AdamW(ps, lr=0.01),
+}
+histories = {name: train(make) for name, make in runs.items()}
+```
+
+```{python}
+#| label: fig-moons-optimizers
+#| fig-cap: "Training loss per epoch on two moons for four optimizers."
+fig, ax = plt.subplots(figsize=(6, 3.5))
+for name, history in histories.items():
+    ax.semilogy(range(1, len(history) + 1), history, label=name)
+ax.set_xlabel("epoch")
+ax.set_ylabel("training loss")
+ax.legend(fontsize=8)
+plt.show()
+```
+
+### Schedules
+
+```{python}
+#| label: fig-schedules
+#| fig-cap: "Learning rate per epoch for three schedules starting from η₀ = 0.1."
+def rates(make_scheduler, epochs=50):
+    optimizer = optim.SGD([nn.Parameter([0.0])], lr=0.1)
+    scheduler = make_scheduler(optimizer)
+    history = []
+    for _ in range(epochs):
+        history.append(optimizer.lr)
+        scheduler.step()
+    return history
+
+
+fig, ax = plt.subplots(figsize=(6, 3.2))
+ax.plot(rates(lambda o: optim.StepLR(o, step_size=15, gamma=0.3)), label="StepLR(15, 0.3)")
+ax.plot(rates(lambda o: optim.CosineAnnealingLR(o, T_max=50, eta_min=0.001)), label="CosineAnnealingLR(50)")
+ax.plot(rates(lambda o: optim.LinearWarmup(o, warmup_steps=10, start_factor=0.1)), label="LinearWarmup(10)")
+ax.set_xlabel("epoch")
+ax.set_ylabel("learning rate")
+ax.legend(fontsize=8)
+plt.show()
+```
+
+## Exercises
+
+::: {.callout-tip title="Exercise 5.1: the stability limit"}
+Run gradient descent on the quadratic above with $\eta = 0.079$ and with
+$\eta = 0.081$ for 100 steps. What happens, and why?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+for lr in (0.079, 0.081):
+    final = trajectory(lambda ps: optim.SGD(ps, lr=lr), steps=100)[-1]
+    print(lr, final)
+```
+
+The factor along $\theta_2$ is $1 - 25\eta$: $-0.975$ for $\eta = 0.079$
+(slowly decaying oscillation) and $-1.025$ for $\eta = 0.081$ (growing
+oscillation), exactly the limit $2/\lambda_\max = 0.08$ of @eq-gd-stable.
+:::
+
+::: {.callout-tip title="Exercise 5.2: why the bias correction"}
+For a constant gradient $g = 1$, compute Adam's first step with and without
+the bias correction ($\beta_1 = 0.9$, $\beta_2 = 0.999$, $\eta = 0.1$).
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+Without correction $m_1 = 0.1$ and $v_1 = 0.001$, so the step is
+$\eta\, m_1 / \sqrt{v_1} = 0.1 \cdot 0.1 / 0.0316 \approx 0.316$, more than
+three times $\eta$. With the correction $\hat m_1 = \hat v_1 = 1$ and the step
+is exactly $\eta = 0.1$:
+
+```{python}
+theta = nn.Parameter([0.0])
+theta.grad = Tensor([1.0])
+optim.Adam([theta], lr=0.1).step()
+print(theta.item(), 0.1 * 0.1 / np.sqrt(0.001))
+```
+:::
+
+::: {.callout-tip title="Exercise 5.3: L2 versus decoupled weight decay"}
+Take two parameters, both equal to 1, whose loss gradient is pure noise:
+standard deviation 0.01 for the first and 10 for the second. Apply Adam and
+AdamW with $\eta = 0.01$ and $\lambda = 0.1$ for 1000 steps. Which
+parameters shrink?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+def decay(cls):
+    generator = np.random.default_rng(0)
+    theta = nn.Parameter([1.0, 1.0])
+    optimizer = cls([theta], lr=0.01, weight_decay=0.1)
+    for _ in range(1000):
+        theta.grad = Tensor(generator.normal(size=2) * np.array([0.01, 10.0]))
+        optimizer.step()
+    return theta.data
+
+
+print("Adam  (L2):       ", decay(optim.Adam))
+print("AdamW (decoupled):", decay(optim.AdamW))
+print("(1 - lr λ)^1000 = ", (1 - 0.01 * 0.1) ** 1000)
+```
+
+With the L2 form, the decay term $\lambda\theta = 0.1$ dominates the small
+noise of the first parameter, and Adam moves it by about $\eta$ per step
+towards 0; for the second parameter the same term is drowned by the large
+gradients and divided by their large $\sqrt{\hat v}$, so the decay is
+mostly lost in the noise. AdamW shrinks both by the same factor
+$(1 - \eta\lambda)$ per step, plus a noise-driven drift.
+:::
+
+::: {.callout-tip title="Exercise 5.4: mini-batch noise"}
+At the initialization of the moons model, estimate the variance of the
+mini-batch gradient of the first weight matrix for batch sizes 8, 32 and
+128 (over 200 random batches each). How does it scale?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+manual_seed(0)
+probe = nn.Sequential(nn.Linear(2, 32), nn.ReLU(), nn.Linear(32, 2))
+generator = np.random.default_rng(0)
+for batch_size in (8, 32, 128):
+    gradients = []
+    for _ in range(200):
+        index = generator.choice(len(y), size=batch_size, replace=False)
+        probe.zero_grad()
+        F.cross_entropy(probe(Tensor(X[index])), Tensor(y[index])).backward()
+        gradients.append(probe[0].weight.grad.data.ravel())
+    print(batch_size, np.var(np.array(gradients), axis=0).sum())
+```
+
+The variance falls roughly like $1/B$: four times larger batches, about
+four times less variance.
+:::
+
+## Notes and references
+
+- This chapter supports lecture 10 of *Advanced Machine Learning*
+  (optimizers).
+- Optimization for deep learning, including the quadratic model, momentum
+  and adaptive methods: @goodfellow2016deep, chapter 8.
+- Momentum and Nesterov momentum for deep networks:
+  @sutskever2013importance. RMSprop: @hinton2012lecture. Adam:
+  @kingma2015adam. AdamW: @loshchilov2019decoupled. Cosine schedules (with
+  restarts): @loshchilov2017sgdr.

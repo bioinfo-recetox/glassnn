@@ -16,6 +16,9 @@ book:
       chapters:
         - chapters/01-introduction.qmd
         - chapters/02-autodiff.qmd
+        - chapters/03-mlp.qmd
+        - chapters/04-initialization.qmd
+        - chapters/05-optimization.qmd
     - references.qmd
 
 bibliography: ../docs/references.bib

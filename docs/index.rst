@@ -8,8 +8,10 @@ each operation and references. Theory, derivations and tutorials are in the
 
 The package re-exports the most used names: ``glassnn.Tensor`` is
 :class:`glassnn.tensor.Tensor`, ``glassnn.no_grad`` is
-:class:`glassnn.tensor.no_grad`, and ``glassnn.backend`` is the module
-:mod:`glassnn.backend`.
+:class:`glassnn.tensor.no_grad`, ``glassnn.manual_seed`` is
+:func:`glassnn.backend.manual_seed`; ``glassnn.nn.Linear`` is
+:class:`glassnn.nn.linear.Linear`, and so on for the classes listed in
+:mod:`glassnn.nn` and :mod:`glassnn.optim`.
 
 .. toctree::
    :maxdepth: 2
@@ -18,5 +20,9 @@ The package re-exports the most used names: ``glassnn.Tensor`` is
    glassnn.tensor
    glassnn.backend
    glassnn.gradcheck
+   glassnn.functional
+   glassnn.nn
+   glassnn.optim
+   glassnn.data
    planned
    bibliography
