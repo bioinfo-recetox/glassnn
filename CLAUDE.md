@@ -22,7 +22,7 @@ uv run sphinx-build -W docs docs/_build/html
 
 ## Conventions
 
-- **Readability beats cleverness.** This code is read by students. Short functions, clear names, no metaprogramming, no hidden global state except the documented backend and generator.
+- **Readability beats cleverness.** This code is read by students. Short functions, clear names, no metaprogramming, no hidden global state except the documented backend, generator and grad-mode flag (`no_grad`).
 - **PyTorch naming parity** for classes, functions and arguments (`Module`, `Linear`, `forward`, `zero_grad`, `step`, `lr`, `weight_decay`, `eps`, `betas`). Where behaviour differs, document it in the docstring under "Differences from PyTorch".
 - **Docstrings:** Google style (rendered by `sphinx.ext.napoleon`). Each public symbol states the math in LaTeX, tensor shapes, parameters, a short doctested example, and `References` with BibTeX keys from `docs/references.bib`. Each autodiff op writes its derivative in the docstring.
 - **Type hints** on the public API. Raise informative errors (shape mismatches name both shapes). No in-place tensor operations; raise `NotImplementedError` with an explanation if attempted.

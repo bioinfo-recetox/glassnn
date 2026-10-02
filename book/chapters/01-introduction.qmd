@@ -1,0 +1,212 @@
+# Introduction and installation {#sec-introduction}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Know what GlassNN is for, and what it deliberately leaves out.
+- Install GlassNN and run a first computation.
+- Understand the array backend and why every operation goes through `backend.xp`.
+- Choose between float32 and float64, and know why gradient checks need float64.
+
+## Theory
+
+### What a neural-network library does
+
+A neural-network library does three jobs:
+
+1. it stores numbers in multidimensional arrays (*tensors*) and computes with them;
+2. it computes derivatives of those computations automatically (@sec-autodiff);
+3. it provides building blocks: layers, losses and optimizers (later chapters).
+
+Production libraries such as PyTorch do these jobs in compiled code, tuned for
+speed. GlassNN does them in a few thousand lines of plain Python on top of
+NumPy [@harris2020array], so that each step can be read, printed and changed.
+It uses PyTorch's names (`Tensor`, `backward`, `no_grad`, later `Module`,
+`Linear`, `zero_grad`, `step`), so code written with GlassNN transfers almost
+line by line.
+
+GlassNN is not fast at scale, does not load pretrained models, and has no
+in-place operations. These are deliberate choices: every one of them would
+make the code longer and harder to read.
+
+### Arrays and the backend
+
+A `Tensor` holds an array of numbers in its attribute `.data`. All arithmetic
+is *vectorized*: one call such as `a.data * b.data` processes every element in
+compiled NumPy code, which is orders of magnitude faster than a Python loop
+over the elements.
+
+GlassNN never calls NumPy directly. It calls `backend.xp`, the *active array
+module*. Today that is always NumPy. Because CuPy implements the same API on
+NVIDIA GPUs, switching `backend.xp` to CuPy runs the same code on a GPU; this
+optional backend is the subject of a later chapter.
+
+### Floating-point numbers
+
+A floating-point number stores a sign, an exponent and a significand of $p$
+bits. The spacing between 1 and the next representable number is the
+*machine epsilon* $\varepsilon_{\text{mach}} = 2^{1-p}$, and every arithmetic
+operation is exact up to a relative error of at most half of it:
+
+$$
+\operatorname{fl}(x \circ y) = (x \circ y)(1 + \delta),
+\qquad |\delta| \le u = \tfrac{1}{2}\varepsilon_{\text{mach}},
+$$ {#eq-rounding}
+
+where $\circ$ is one of $+, -, \times, /$ and $u$ is the *unit roundoff*
+[@goodfellow2016deep, chap. 4].
+
+| dtype | significand bits $p$ | $\varepsilon_{\text{mach}}$ | bytes per number |
+|---|---|---|---|
+| float32 | 24 | $2^{-23} \approx 1.2 \times 10^{-7}$ | 4 |
+| float64 | 53 | $2^{-52} \approx 2.2 \times 10^{-16}$ | 8 |
+
+Training a network tolerates float32 well: stochastic gradients are noisy
+anyway, and float32 halves the memory and doubles the arithmetic throughput.
+GlassNN therefore uses **float32 by default**, like PyTorch. Checking
+gradients numerically (@sec-autodiff) compares two quantities that agree only
+to a fraction of the available digits, so the tests and gradient checks use
+**float64**.
+
+### The dtype rule
+
+When a tensor is created, its dtype follows one rule:
+
+- an explicit `dtype=` always wins;
+- otherwise floating-point input (Python floats, lists of floats, NumPy arrays
+  of *any* float dtype) becomes the default dtype;
+- integer and boolean input keeps its dtype (integers are used as indices and
+  class labels).
+
+::: {.callout-warning title="Differences from PyTorch"}
+`torch.tensor(np.ones(3))` keeps the float64 dtype of the NumPy array.
+GlassNN casts it to the default dtype, so that data created with NumPy (which
+defaults to float64) never silently mixes with float32 parameters.
+:::
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+The backend lives in `{python} api_link("glassnn.backend")`
+(`{python} src_link("glassnn.backend.asarray")`). Every tensor is created
+through `asarray`, which applies the dtype rule:
+
+```{python}
+#| echo: false
+show_source("glassnn.backend.asarray")
+```
+
+`{python} see_also("glassnn.backend.set_default_dtype", "glassnn.backend.set_backend", "glassnn.Tensor")`
+:::
+
+## Try it
+
+### Installation
+
+GlassNN needs Python 3.13 or newer. Install a tagged release with `pip` or
+`uv` directly from GitHub (no PyPI package is published):
+
+```bash
+pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.0"
+```
+
+To work on the library itself, clone the repository and run
+`uv sync --extra dev`, then `uv run pytest`.
+
+### A first computation
+
+```{python}
+import numpy as np
+
+import glassnn
+from glassnn import Tensor, backend
+
+print(glassnn.__version__, backend.get_backend(), backend.get_default_dtype())
+x = Tensor([[1.0, 2.0], [3.0, 4.0]])
+x, x.shape, x.dtype
+```
+
+The dtype rule in action: a float64 NumPy array becomes float32, integers stay
+integers.
+
+```{python}
+Tensor(np.ones(3)).dtype, Tensor(np.arange(3)).dtype, Tensor([1, 2], dtype="float64").dtype
+```
+
+### Rounding
+
+In float32, adding $10^{-8}$ to 1 changes nothing, because $10^{-8}$ is below
+the unit roundoff $u \approx 6 \times 10^{-8}$ (@eq-rounding). In float64 the
+sum is exact enough to differ from 1.
+
+```{python}
+print(np.finfo(np.float32).eps, np.finfo(np.float64).eps)
+print("float32:", (Tensor([1.0]) + 1e-8).item() == 1.0)
+
+backend.set_default_dtype("float64")
+print("float64:", (Tensor([1.0]) + 1e-8).item() == 1.0)
+backend.set_default_dtype("float32")
+```
+
+## Exercises
+
+::: {.callout-tip title="Exercise 1.1: memory"}
+How many bytes does a $1000 \times 1000$ tensor take in float32 and in
+float64? Check your answer with `.data.nbytes`.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$10^6$ numbers of 4 and 8 bytes: 4 MB and 8 MB.
+
+```{python}
+Tensor(np.zeros((1000, 1000))).data.nbytes, Tensor(np.zeros((1000, 1000)), dtype="float64").data.nbytes
+```
+:::
+
+::: {.callout-tip title="Exercise 1.2: summation order"}
+Add $10^6$ copies of $0.1$ in float32, once one after the other
+(`np.cumsum(...)[-1]`) and once with `np.sum`. Which is closer to $10^5$, and
+why?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+values = np.full(10**6, 0.1, dtype=np.float32)
+print("one after the other:", np.cumsum(values)[-1])
+print("np.sum:             ", np.sum(values))
+```
+
+Sequential summation makes an error of up to $u$ relative to the running sum
+at each step, and the running sum grows to $10^5$, so the errors add up to a
+visible amount. `np.sum` uses *pairwise* summation, which adds numbers of
+similar size, so its error grows only logarithmically with the number of
+terms.
+:::
+
+::: {.callout-tip title="Exercise 1.3: the dtype rule"}
+Predict the dtype of `Tensor(np.ones(3, dtype=np.float16))`,
+`Tensor([True, False])` and `Tensor(3)`, then check.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+float32 (any floating input becomes the default dtype), bool and int64
+(non-floating input keeps its dtype).
+
+```{python}
+Tensor(np.ones(3, dtype=np.float16)).dtype, Tensor([True, False]).dtype, Tensor(3).dtype
+```
+:::
+
+## Notes and references
+
+- This chapter supports lecture 10 of *Advanced Machine Learning* (training and
+  generalization).
+- NumPy and the idea of array programming: @harris2020array.
+- Floating-point arithmetic and numerical issues in deep learning, such as
+  overflow and underflow: @goodfellow2016deep, chapter 4.

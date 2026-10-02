@@ -18,6 +18,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.extlinks",
     "sphinxcontrib.bibtex",
 ]
 
@@ -30,6 +31,9 @@ autodoc_member_order = "bysource"
 
 bibtex_bibfiles = ["references.bib"]
 bibtex_default_style = "plain"
+
+# :book:`Title <chapters/02-autodiff.html>` links to a chapter of the book.
+extlinks = {"book": (BOOK_URL + "%s", "%s")}
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
