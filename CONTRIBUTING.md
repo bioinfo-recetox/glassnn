@@ -17,11 +17,13 @@ only on such a machine: `uv sync --extra gpu`.
 
 ```
 uv run pytest                                  # tests (torch and gpu markers excluded)
-uv run pytest -m torch                         # PyTorch cross-checks (needs torch)
+uv pip install torch --index-url https://download.pytorch.org/whl/cpu  # once; not in the lock file
+uv run pytest -m torch                         # PyTorch cross-checks
 uv run pytest -m gpu                           # CuPy parity tests (needs CuPy and a GPU)
 uv run ruff check . && uv run ruff format --check .
 uv run sphinx-build -W docs docs/_build/html   # API reference
 uv run quarto render book                      # the book
+uv run python book/_check_api_links.py         # book -> API links (after both builds)
 ```
 
 ## Rules

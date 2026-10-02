@@ -33,8 +33,54 @@ annotated git tags.
 - Verified references: Rumelhart et al. 1986, Baydin et al. 2018, Griewank
   and Walther 2008, Goodfellow et al. 2016, Harris et al. 2020.
 
+- `glassnn.backend.manual_seed`/`get_generator` (also `glassnn.manual_seed`) and
+  the `erf` adapter.
+- `glassnn.functional`: `relu`, `leaky_relu`, `gelu` (exact and tanh),
+  `tanh`, `sigmoid`, `softplus`, `softmax`, `log_softmax`, `logsumexp`,
+  `linear`, `cross_entropy` (label smoothing, reductions),
+  `binary_cross_entropy_with_logits`, `mse_loss`; stable for extreme inputs.
+- `glassnn.nn`: `Module` (registration by assignment, `parameters`,
+  `named_parameters`, `modules`, `apply`, `train`/`eval`, `zero_grad`,
+  `state_dict`/`load_state_dict`), `Parameter`, `Sequential`, `Linear`
+  (PyTorch's default initialization), activation modules (`ReLU`,
+  `LeakyReLU`, `GELU`, `Tanh`, `Sigmoid`, `Softplus`, `Softmax`,
+  `LogSoftmax`), loss modules (`MSELoss`, `CrossEntropyLoss`,
+  `BCEWithLogitsLoss`).
+- `glassnn.nn.init`: `calculate_gain`, `xavier_uniform_`/`xavier_normal_`,
+  `kaiming_uniform_`/`kaiming_normal_`, `uniform_`, `normal_`, `zeros_`,
+  `ones_` (optional `generator=`).
+- `glassnn.optim`: `SGD` (momentum, Nesterov, weight decay), `Adam`, `AdamW`,
+  `RMSprop`, schedulers `StepLR`, `CosineAnnealingLR`, `LinearWarmup`, and
+  `clip_grad_norm_`.
+- `glassnn.data`: `DataLoader` (arrays in memory, shuffling per epoch,
+  `drop_last`, `generator=`) and `one_hot`.
+- Tests: XOR and two moons (test accuracy >= 0.95) are learned; training is
+  bit-for-bit reproducible with a fixed seed (float32 and float64); float32
+  training stays in float32; 67 PyTorch cross-checks (marker `torch`, run in
+  a separate CI job with CPU PyTorch).
+- Book: chapter 3 (backpropagation in an MLP), chapter 4 (initialization and
+  the flow of signals), chapter 5 (optimization); `book/_check_api_links.py`
+  checks every link from the book into the API reference in CI.
+- `Tensor.__repr__` aligns multi-line values and shows the class name
+  (`Parameter(...)`).
+- Verified references: Glorot and Bengio 2010, He et al. 2015, Sutskever et
+  al. 2013, Kingma and Ba 2015, Loshchilov and Hutter 2017 and 2019,
+  Hendrycks and Gimpel 2016, Szegedy et al. 2016, and the RMSprop lecture
+  slides (Hinton, Srivastava and Swersky 2012).
+- scikit-learn added to the `dev`, `book` and `examples` extras (not a
+  runtime dependency).
+
 ### Differences from PyTorch
 
+- Optimizers have one parameter group; the learning rate is `optimizer.lr`.
+- `clip_grad_norm_` lives in `glassnn.optim`; `one_hot` in `glassnn.data`.
+- `LinearWarmup` is PyTorch's `LinearLR(start_factor, 1.0, total_iters)`.
+- `DataLoader` takes arrays, not a `Dataset`.
+- `manual_seed` returns a NumPy generator; the generator is unseeded until
+  `manual_seed` is called.
+- `Module.state_dict()` returns copies.
+- `cross_entropy` supports `(N, C)` logits with integer labels only;
+  `mse_loss` and `binary_cross_entropy_with_logits` reject different shapes.
 - Floating-point NumPy arrays are cast to the default dtype (PyTorch keeps
   float64).
 - The graph is kept after `backward()` (no `retain_graph` needed).

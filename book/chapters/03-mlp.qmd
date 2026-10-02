@@ -1,0 +1,371 @@
+# Backpropagation in a multilayer perceptron {#sec-mlp}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Write a multilayer perceptron (MLP) as a composition of affine maps and
+  nonlinearities, with the shape of every tensor.
+- Derive the backpropagation equations of an MLP in matrix form, for a
+  mini-batch.
+- Understand why the gradient of softmax plus cross-entropy is
+  "prediction minus target", and why the loss must be computed from logits.
+- Build, train and inspect an MLP with `Module`, `Linear` and `Sequential`.
+
+## Theory
+
+### The model
+
+An MLP with $L$ layers maps a mini-batch $X \in \R^{N \times d_0}$ ($N$
+samples, $d_0$ features) to outputs through alternating affine maps and
+elementwise nonlinearities $\varphi$:
+
+$$
+H_0 = X, \qquad
+Z_l = H_{l-1} W_l^\top + \mathbf{1} b_l^\top, \qquad
+H_l = \varphi(Z_l) \quad (l = 1, \dots, L - 1), \qquad
+Z_L = H_{L-1} W_L^\top + \mathbf{1} b_L^\top .
+$$ {#eq-mlp}
+
+The weight $W_l \in \R^{d_l \times d_{l-1}}$ has one row per output unit
+(the convention of PyTorch and GlassNN), $b_l \in \R^{d_l}$, and
+$Z_l, H_l \in \R^{N \times d_l}$. The last layer has no nonlinearity: its
+outputs $Z_L$ are the **logits**, unnormalized scores that the loss turns
+into probabilities. The network has
+$\sum_{l=1}^{L} d_l (d_{l-1} + 1)$ parameters.
+
+Without the nonlinearities the composition would collapse into a single
+affine map. With them, an MLP with one hidden layer can approximate any
+continuous function on a compact set arbitrarily well, given enough hidden
+units [@goodfellow2016deep, sec. 6.4.1]. Common choices of $\varphi$:
+
+| $\varphi(z)$ | definition | $\varphi'(z)$ |
+|---|---|---|
+| ReLU | $\max(z, 0)$ | $[z > 0]$ |
+| leaky ReLU | $\max(z, \alpha z)$ | $1$ or $\alpha$ |
+| tanh | $\tanh z$ | $1 - \tanh^2 z$ |
+| sigmoid | $\sigma(z) = 1 / (1 + e^{-z})$ | $\sigma(z)(1 - \sigma(z))$ |
+| softplus | $\ln(1 + e^z)$ | $\sigma(z)$ |
+| GELU | $z\, \Phi(z)$ | $\Phi(z) + z\, \varphi_{\mathcal N}(z)$ |
+
+GELU [@hendrycks2016gaussian] uses the standard normal distribution function
+$\Phi$ and density $\varphi_{\mathcal N}$; it is the activation of most
+transformers. tanh and sigmoid **saturate**: their derivatives vanish for
+large $|z|$, which slows learning in deep networks (@sec-initialization).
+
+### Softmax and cross-entropy
+
+For $C$ classes, the softmax turns a row of logits $z \in \R^C$ into
+probabilities, and the cross-entropy of the true class $y$ is the loss:
+
+$$
+p_c = \frac{e^{z_c}}{\sum_k e^{z_k}}, \qquad
+\ell(z, y) = -\ln p_y = -z_y + \ln \sum_k e^{z_k} .
+$$ {#eq-ce}
+
+Differentiating the right-hand form gives a remarkably simple gradient:
+
+$$
+\frac{\partial \ell}{\partial z_c} = -[c = y] + \frac{e^{z_c}}{\sum_k e^{z_k}}
+= p_c - [c = y],
+\qquad\text{i.e.}\qquad \nabla_z \ell = p - e_y ,
+$$ {#eq-ce-grad}
+
+the predicted distribution minus the one-hot target. The same "prediction
+minus target" form appears for the logistic loss of binary classification
+and for the squared error of regression: these are the losses of
+generalized linear models with their canonical links.
+
+The right-hand form of @eq-ce also shows how to compute the loss safely.
+$e^{z_c}$ overflows in float32 for $z_c > 88$; but
+$\ln \sum_k e^{z_k} = m + \ln \sum_k e^{z_k - m}$ for any $m$, and with
+$m = \max_k z_k$ the largest exponent is $e^0 = 1$. This is the
+**log-sum-exp trick**. A loss must therefore be computed from the logits by
+`log_softmax` or `cross_entropy`, never as `log(softmax(z))`: the softmax of
+a very negative logit underflows to 0, and $\ln 0 = -\infty$.
+
+### Backpropagation in matrix form
+
+With the mean loss over the mini-batch,
+$\mathcal L = \frac1N \sum_n \ell(z_n, y_n)$, @eq-ce-grad gives the adjoint
+of the logits, and the rules of @sec-autodiff (the matrix product of
+@eq-matmul-vjp, broadcasting of @eq-broadcast) give everything else, from the
+last layer to the first [@rumelhart1986learning; @goodfellow2016deep, sec. 6.5]:
+
+$$
+\begin{aligned}
+\bar Z_L &= \tfrac1N (P - Y), \\
+\bar W_l &= \bar Z_l^\top H_{l-1}, \qquad
+\bar b_l = \bar Z_l^\top \mathbf 1, \qquad
+\bar H_{l-1} = \bar Z_l W_l, \\
+\bar Z_{l-1} &= \bar H_{l-1} \odot \varphi'(Z_{l-1}),
+\end{aligned}
+$$ {#eq-backprop}
+
+where $P$ holds the predicted probabilities and $Y$ the one-hot targets,
+both of shape $N \times C$. Each step is one matrix product or one
+elementwise product, so the backward pass costs about twice the forward
+pass. It needs the stored $H_{l-1}$ and $Z_{l-1}$ of the forward pass: this
+is the memory cost of reverse mode.
+
+### Modules
+
+Writing $W_1, b_1, W_2, \dots$ by hand does not scale. A **module** bundles
+parameters with the function that uses them: `Linear` holds $W$ and $b$ and
+computes @eq-mlp for one layer; `Sequential` chains modules; any model is a
+subclass of `Module` that assigns its layers as attributes and defines
+`forward`. The module then *knows its parameters*: `model.parameters()`
+walks the tree of sub-modules and yields every learnable tensor, which is
+what an optimizer needs.
+
+`Linear` initializes its weights uniformly on
+$[-1/\sqrt{d_{l-1}}, 1/\sqrt{d_{l-1}}]$, as PyTorch does; the reasons, and
+better choices for deep networks, are the subject of @sec-initialization.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+The activations and losses are in `{python} api_link("glassnn.functional")`.
+An activation with a simple derivative has its own backward function:
+
+```{python}
+#| echo: false
+show_source("glassnn.functional.relu")
+```
+
+`log_softmax` implements the log-sum-exp trick and the backward function
+$\bar z_j - \operatorname{softmax}(z)_j \sum_k \bar z_k$
+(`{python} src_link("glassnn.functional.log_softmax")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.functional.log_softmax")
+```
+
+`cross_entropy` is then a composition, so its gradient @eq-ce-grad comes
+from the rules of indexing and `log_softmax`
+(`{python} src_link("glassnn.functional.cross_entropy")`).
+
+`{python} api_link("glassnn.nn.Linear")` stores the parameters and calls
+`functional.linear`:
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.Linear.forward")
+```
+
+Registration happens in `Module.__setattr__`: assigning a `Parameter` or a
+`Module` to an attribute records it under that name
+(`{python} src_link("glassnn.nn.Module.__setattr__")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.Module.__setattr__")
+```
+
+`{python} see_also("glassnn.nn.Module", "glassnn.nn.Sequential", "glassnn.nn.Parameter", "glassnn.functional.cross_entropy")`
+:::
+
+::: {.callout-warning title="Differences from PyTorch"}
+- `Module.state_dict()` returns copies of the parameters, not tensors that
+  share memory with them.
+- `cross_entropy` accepts logits of shape `(N, C)` with integer labels only.
+- `mse_loss` and `binary_cross_entropy_with_logits` raise an error for
+  different input and target shapes; PyTorch broadcasts them with a warning.
+:::
+
+## Try it
+
+### Backpropagation by hand and by autodiff
+
+A two-layer MLP on a small random batch: the gradients of @eq-backprop,
+computed with NumPy, agree with those of `backward()`.
+
+```{python}
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, backend, manual_seed, nn
+
+backend.set_default_dtype("float64")
+manual_seed(0)
+rng = np.random.default_rng(0)
+N, d0, d1, C = 8, 3, 5, 4
+X = rng.normal(size=(N, d0))
+y = rng.integers(0, C, size=N)
+
+layer1, layer2 = nn.Linear(d0, d1), nn.Linear(d1, C)
+loss = F.cross_entropy(layer2(F.tanh(layer1(Tensor(X)))), Tensor(y))
+loss.backward()
+
+# The same, with equations (eq-mlp) and (eq-backprop).
+W1, b1 = layer1.weight.data, layer1.bias.data
+W2, b2 = layer2.weight.data, layer2.bias.data
+Z1 = X @ W1.T + b1
+H1 = np.tanh(Z1)
+Z2 = H1 @ W2.T + b2
+P = np.exp(Z2 - Z2.max(axis=1, keepdims=True))
+P /= P.sum(axis=1, keepdims=True)
+Y = np.eye(C)[y]
+Z2_bar = (P - Y) / N
+W2_bar, b2_bar = Z2_bar.T @ H1, Z2_bar.sum(axis=0)
+Z1_bar = (Z2_bar @ W2) * (1 - H1**2)
+W1_bar, b1_bar = Z1_bar.T @ X, Z1_bar.sum(axis=0)
+
+for name, by_hand, auto in [("W1", W1_bar, layer1.weight.grad), ("b1", b1_bar, layer1.bias.grad),
+                            ("W2", W2_bar, layer2.weight.grad), ("b2", b2_bar, layer2.bias.grad)]:
+    print(name, np.abs(by_hand - auto.data).max())
+backend.set_default_dtype("float32")
+```
+
+### A model as a module
+
+```{python}
+manual_seed(0)
+model = nn.Sequential(
+    nn.Linear(2, 32), nn.ReLU(),
+    nn.Linear(32, 32), nn.ReLU(),
+    nn.Linear(32, 2),
+)
+print(model)
+print("parameters:", sum(p.data.size for p in model.parameters()))
+[(name, p.shape) for name, p in model.named_parameters()]
+```
+
+### Training on two moons
+
+Two interleaved half circles with noise, from scikit-learn. The model above
+is trained with mini-batches (the optimizer and the data loader are the
+subject of @sec-optimization).
+
+```{python}
+from sklearn.datasets import make_moons
+from sklearn.model_selection import train_test_split
+
+from glassnn import no_grad, optim
+from glassnn.data import DataLoader
+
+X, y = make_moons(n_samples=1000, noise=0.2, random_state=0)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0)
+
+manual_seed(0)
+optimizer = optim.Adam(model.parameters(), lr=0.01)
+loader = DataLoader(X_train, y_train, batch_size=32, shuffle=True)
+losses = []
+for epoch in range(60):
+    for xb, yb in loader:
+        optimizer.zero_grad()
+        loss = F.cross_entropy(model(xb), yb)
+        loss.backward()
+        optimizer.step()
+    losses.append(loss.item())
+
+with no_grad():
+    accuracy = (model(Tensor(X_test)).data.argmax(axis=1) == y_test).mean()
+print(f"final mini-batch loss {losses[-1]:.3f}, test accuracy {accuracy:.3f}")
+```
+
+```{python}
+#| label: fig-moons
+#| fig-cap: "Decision regions of the trained MLP on the two-moons test set."
+import matplotlib.pyplot as plt
+
+grid = np.stack(np.meshgrid(np.linspace(-1.6, 2.6, 200), np.linspace(-1.2, 1.7, 200)), axis=-1)
+with no_grad():
+    probability = F.softmax(model(Tensor(grid.reshape(-1, 2))), dim=1).data[:, 1]
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.contourf(grid[..., 0], grid[..., 1], probability.reshape(200, 200), levels=20, cmap="RdBu_r", alpha=0.6)
+ax.scatter(X_test[:, 0], X_test[:, 1], c=y_test, cmap="RdBu_r", edgecolor="k", s=15)
+ax.set_xlabel("$x_1$")
+ax.set_ylabel("$x_2$")
+plt.show()
+```
+
+## Exercises
+
+::: {.callout-tip title="Exercise 3.1: counting parameters"}
+How many parameters does an MLP with layer widths $2, 32, 32, 2$ have? Check
+with the model above.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$\sum_l d_l (d_{l-1} + 1) = 32 \cdot 3 + 32 \cdot 33 + 2 \cdot 33 = 96 + 1056 + 66 = 1218$,
+which is the number printed above.
+:::
+
+::: {.callout-tip title="Exercise 3.2: log of softmax"}
+Compute `F.softmax(z, dim=1).log()` and `F.log_softmax(z, dim=1)` for
+`z = Tensor([[0.0, -200.0]])` in float32. Explain the difference.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+z = Tensor([[0.0, -200.0]])
+F.softmax(z, dim=1).log(), F.log_softmax(z, dim=1)
+```
+
+$e^{-200} \approx 10^{-87}$ is below the smallest positive float32
+($\approx 10^{-45}$), so the softmax rounds it to 0 and the logarithm
+gives $-\infty$. `log_softmax` computes $z_c - \operatorname{logsumexp}(z)$
+directly and returns the exact $-200$.
+:::
+
+::: {.callout-tip title="Exercise 3.3: the squared error"}
+For regression with $\mathcal L = \frac{1}{N} \sum_n \lVert z_n - t_n \rVert^2$
+(`F.mse_loss` with `reduction="sum"` divided by $N$), what is $\bar Z_L$?
+Check it with `backward()` on a random batch.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$\bar Z_L = \frac{2}{N}(Z_L - T)$: again prediction minus target, up to a
+factor.
+
+```{python}
+backend.set_default_dtype("float64")
+Z = Tensor(rng.normal(size=(4, 3)), requires_grad=True)
+T = Tensor(rng.normal(size=(4, 3)))
+(F.mse_loss(Z, T, reduction="sum") / 4).backward()
+print(np.abs(Z.grad.data - 2 / 4 * (Z.data - T.data)).max())
+backend.set_default_dtype("float32")
+```
+:::
+
+::: {.callout-tip title="Exercise 3.4: your own module"}
+Write a module `Residual(width)` whose output is $x + \operatorname{Linear}(\operatorname{ReLU}(\operatorname{Linear}(x)))$
+with both layers of size `width × width`. How many parameters does it
+register, and under which names?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+class Residual(nn.Module):
+    def __init__(self, width):
+        super().__init__()
+        self.inner = nn.Linear(width, width)
+        self.outer = nn.Linear(width, width)
+
+    def forward(self, x):
+        return x + self.outer(F.relu(self.inner(x)))
+
+block = Residual(4)
+[(name, p.shape) for name, p in block.named_parameters()]
+```
+
+Two weights and two biases: $2 \cdot (16 + 4) = 40$ parameters, named after
+the attributes.
+:::
+
+## Notes and references
+
+- This chapter supports lecture 10 of *Advanced Machine Learning*
+  (backpropagation).
+- The backpropagation algorithm for multilayer networks:
+  @rumelhart1986learning; a detailed treatment, including the universal
+  approximation theorem, in @goodfellow2016deep, chapter 6.
+- GELU: @hendrycks2016gaussian. Label smoothing, a variant of the
+  cross-entropy available as `label_smoothing=`: @szegedy2016rethinking.
