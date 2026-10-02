@@ -1,0 +1,25 @@
+# Preface {.unnumbered}
+
+{{< include _macros.qmd >}}
+
+GlassNN is a small neural-network library whose source code is meant to be
+read. This book explains the theory behind each part of the library, points
+to the code that implements it, and contains runnable tutorials. It
+accompanies lectures 10 (training and generalization) and 11 (architectures
+and representations) of the course *Advanced Machine Learning*.
+
+The API reference is published alongside this book, under
+[`api/`](api/index.html).
+
+::: {.callout-note}
+The book is under construction. Chapters are added milestone by milestone,
+together with the code they describe.
+:::
+
+This copy of the book was built with:
+
+```{python}
+import glassnn
+
+print(f"glassnn {glassnn.__version__}")
+```

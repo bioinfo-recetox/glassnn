@@ -1,0 +1,17 @@
+GlassNN
+Copyright (c) 2026 Vlad Popovici, RECETOX - Faculty of Science, Masaryk University
+
+This product contains no third-party source code.
+
+Third-party files:
+
+- book/assets/ieee.csl: "IEEE Reference Guide version 11.29.2023" citation
+  style from the Citation Style Language styles repository
+  (https://github.com/citation-style-language/styles), by Michael Berkowitz
+  and contributors (listed in the file). Licensed under the Creative Commons
+  Attribution-ShareAlike 3.0 License
+  (http://creativecommons.org/licenses/by-sa/3.0/). Unmodified.
+
+Acknowledgement: the idea of a minimal scalar autograd engine as a teaching
+tool is inspired by Andrej Karpathy's micrograd (MIT license,
+https://github.com/karpathy/micrograd). No code from micrograd is included.

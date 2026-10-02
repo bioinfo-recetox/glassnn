@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Tools
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ipynb_checkpoints/
+
+# Documentation builds
+docs/_build/
+book/_book/
+book/.quarto/
+book/_freeze/
+site/
+
+# Editors
+.idea/
+.vscode/

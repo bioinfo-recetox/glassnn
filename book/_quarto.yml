@@ -1,0 +1,27 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "GlassNN"
+  subtitle: "Neural networks you can see through"
+  author: "Vlad Popovici"
+  repo-url: https://github.com/bioinfo-recetox/glassnn
+  repo-subdir: book
+  chapters:
+    - index.qmd
+    - references.qmd
+
+bibliography: ../docs/references.bib
+csl: assets/ieee.csl
+
+execute:
+  freeze: auto
+
+jupyter: python3
+
+format:
+  html:
+    theme: cosmo
+    html-math-method: mathjax
+    number-sections: true
