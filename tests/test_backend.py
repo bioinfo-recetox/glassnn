@@ -76,3 +76,43 @@ def test_to_numpy_returns_a_numpy_array():
     out = backend.to_numpy(x)
     assert isinstance(out, np.ndarray)
     np.testing.assert_array_equal(out, [1.0, 2.0])
+
+
+def test_manual_seed_makes_the_global_generator_reproducible():
+    backend.manual_seed(7)
+    first = backend.get_generator().random(5)
+    backend.manual_seed(7)
+    np.testing.assert_array_equal(backend.get_generator().random(5), first)
+
+
+def test_manual_seed_returns_the_new_generator():
+    generator = backend.manual_seed(3)
+    assert generator is backend.get_generator()
+    assert isinstance(generator, np.random.Generator)
+
+
+def test_glassnn_manual_seed_is_the_backend_function():
+    import glassnn
+
+    assert glassnn.manual_seed is backend.manual_seed
+
+
+def test_the_generator_is_unseeded_before_manual_seed():
+    code = (
+        "from glassnn import backend\n"
+        "print(backend.get_generator().integers(0, 2**62))\n"
+    )
+    runs = {
+        subprocess.run(
+            [sys.executable, "-c", code], check=True, capture_output=True, text=True
+        ).stdout
+        for _ in range(2)
+    }
+    assert len(runs) == 2
+
+
+def test_erf_matches_scipy():
+    from scipy import special
+
+    x = np.linspace(-4, 4, 17)
+    np.testing.assert_allclose(backend.erf(x), special.erf(x))

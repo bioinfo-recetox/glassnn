@@ -303,5 +303,9 @@ Software
 | 17 | Graph after `backward` | kept (a second `backward` works without `retain_graph`); documented as a difference from PyTorch |
 | 18 | Book helper names | `api_url`/`src_url` return URLs, `api_link`/`src_link` return Markdown links; `src_url` also accepts an object name |
 | 19 | Global state | backend, random generator and the grad-mode flag of `no_grad` (as in PyTorch) |
+| 20 | Optimizer learning rate | one parameter group; the learning rate is `optimizer.lr`, which schedulers change. Differs from PyTorch (`param_groups`) |
+| 21 | `clip_grad_norm_` | in `glassnn.optim` (PyTorch: `torch.nn.utils`); documented as a difference |
+| 22 | Toy datasets | scikit-learn in the `dev`, `book` and `examples` extras (never a runtime dependency) |
+| 23 | Generator before `manual_seed` | unseeded (like `numpy.random.default_rng()`); tests, examples and the book always seed |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.

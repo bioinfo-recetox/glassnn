@@ -136,13 +136,16 @@ class Tensor:
 
     def __repr__(self) -> str:
         """Show the values, and how the tensor takes part in autodiff."""
-        values = np.array2string(backend.to_numpy(self.data), separator=", ")
+        name = type(self).__name__
+        values = np.array2string(
+            backend.to_numpy(self.data), separator=", ", prefix=f"{name}("
+        )
         extras = ""
         if not self.is_leaf:
             extras = f", op={self._op!r}"
         elif self.requires_grad:
             extras = ", requires_grad=True"
-        return f"Tensor({values}{extras})"
+        return f"{name}({values}{extras})"
 
     def item(self) -> float | int | bool:
         """Return the value of a one-element tensor as a Python number."""

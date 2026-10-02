@@ -1,4 +1,4 @@
-"""Array backend, default dtype and array conversion.
+"""Array backend, default dtype, random generator and array conversion.
 
 GlassNN never calls NumPy directly in its operations. It calls ``backend.xp``,
 the *active array module*, which is NumPy by default. Because CuPy mirrors the
@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+from scipy import special as _scipy_special
 
 #: The active array module (NumPy, or CuPy from milestone M6 on).
 xp: Any = np
@@ -31,6 +32,9 @@ _backend_name = "numpy"
 _default_dtype = np.dtype(np.float32)
 
 _ALLOWED_DEFAULT_DTYPES = (np.dtype(np.float32), np.dtype(np.float64))
+
+# The global random generator; unseeded until manual_seed() is called.
+_generator = np.random.default_rng()
 
 
 def get_backend() -> str:
@@ -145,3 +149,56 @@ def to_numpy(array: Any) -> np.ndarray:
         A ``numpy.ndarray`` with the same values.
     """
     return np.asarray(array)
+
+
+def manual_seed(seed: int) -> np.random.Generator:
+    """Seed the global random generator, and return it.
+
+    Every random choice in GlassNN (initialization, dropout, shuffling)
+    draws from this generator unless an explicit ``generator=`` is given.
+    Before the first call the generator is unseeded, so results differ from
+    run to run, as with ``numpy.random.default_rng()``.
+
+    Args:
+        seed: A non-negative integer.
+
+    Returns:
+        The new global generator.
+
+    Note:
+        Differences from PyTorch: ``torch.manual_seed`` returns a
+        ``torch.Generator`` and PyTorch's generator starts from a fixed seed;
+        GlassNN uses a ``numpy.random.Generator`` that starts unseeded.
+
+    Example:
+        >>> from glassnn import backend
+        >>> a = backend.manual_seed(0).random()
+        >>> b = backend.manual_seed(0).random()
+        >>> a == b
+        True
+    """
+    global _generator
+    _generator = xp.random.default_rng(seed)
+    return _generator
+
+
+def get_generator() -> np.random.Generator:
+    """Return the global random generator (see :func:`manual_seed`)."""
+    return _generator
+
+
+def erf(x: Any) -> Any:
+    r"""The error function, applied elementwise.
+
+    .. math:: \operatorname{erf}(x) = \frac{2}{\sqrt{\pi}} \int_0^x e^{-t^2}\, dt
+
+    NumPy has no ``erf``; this adapter calls ``scipy.special.erf`` (and the
+    CuPy equivalent from milestone M6 on).
+
+    Args:
+        x: An array of the active backend.
+
+    Returns:
+        An array of the same shape.
+    """
+    return _scipy_special.erf(x)
