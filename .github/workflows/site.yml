@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0  # no floating major tag upstream
       # quarto-cli==1.10.18 is pinned by the "book" extra.
       - run: uv sync --extra docs --extra book
       - name: Build API reference
