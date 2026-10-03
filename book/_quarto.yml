@@ -24,6 +24,9 @@ book:
         - chapters/06-regularization.qmd
         - chapters/07-memorization.qmd
         - chapters/08-ntk.qmd
+    - part: "Architectures"
+      chapters:
+        - chapters/09-convolutions.qmd
     - references.qmd
 
 bibliography: ../docs/references.bib

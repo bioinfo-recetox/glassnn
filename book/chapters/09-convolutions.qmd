@@ -1,0 +1,366 @@
+# Convolutions for sequences {#sec-convolutions}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Define 1-D convolution (cross-correlation) with stride, padding and
+  dilation, and relate a filter on one-hot DNA to a position weight matrix.
+- Explain weight sharing, translation equivariance, and the translation
+  invariance that pooling adds.
+- Derive the gradients of a convolution, and see how GlassNN computes the
+  forward pass by gathering windows (im2col) and the backward pass by a
+  scatter-add.
+- Train a small CNN that finds a planted motif, and compare it with the
+  spectrum kernel (example notebook 06).
+
+## Theory
+
+### From a dense layer to a convolution
+
+A DNA sequence of length $L$ is encoded *one-hot*: a matrix
+$x \in \{0, 1\}^{4 \times L}$ with $x_{c,i} = 1$ if base $i$ is the $c$-th
+letter of `ACGT`. A dense layer on the flattened sequence has a separate
+weight for every (base, position) pair and for every output: it must learn a
+motif at every position separately. A **convolution** uses the same small
+filter at every position. For input channels $c$, output channels $o$ and a
+filter of width $K$,
+
+$$
+y_{o,i} = b_o + \sum_{c=1}^{C_\text{in}} \sum_{k=0}^{K-1}
+w_{o,c,k}\, x_{c,\, s i + d k} ,
+$$ {#eq-conv1d}
+
+with stride $s$ and dilation $d$ [@lecun1998gradient]. Strictly this is a
+cross-correlation (a convolution would flip the kernel); since the kernel is
+learned, the flip does not matter and all deep-learning libraries use the
+name convolution. With a batch dimension $n$ in front, the input has shape
+$(N, C_\text{in}, L)$ and the output $(N, C_\text{out}, L_\text{out})$, with
+
+$$
+L_\text{out} = \left\lfloor \frac{L + p_\text{left} + p_\text{right}
+- d(K - 1) - 1}{s} \right\rfloor + 1
+$$ {#eq-conv-length}
+
+after zero padding. `padding="same"` (for $s = 1$) adds $d(K-1)$ zeros in
+total, so $L_\text{out} = L$.
+
+**A filter is a position weight matrix.** For one-hot input, exactly one
+term of the inner sum over $c$ is non-zero at each offset $k$:
+$y_{o,i} = b_o + \sum_k w_{o,\, \text{base}(i+k),\, k}$. This is the score of
+the window starting at $i$ under the position weight matrix $w_{o}$ (a
+$4 \times K$ table), the classical way to scan a sequence for a binding site.
+A convolutional layer learns $C_\text{out}$ such matrices from labelled
+sequences [@alipanahi2015predicting; @zhou2015predicting].
+
+**Weight sharing** reduces the number of parameters from
+$C_\text{out} L_\text{out} \cdot C_\text{in} L$ (dense) to
+$C_\text{out} C_\text{in} K$, independent of the sequence length. It also
+makes the layer **translation equivariant**: shifting the input shifts the
+output by the same amount (for $s = 1$).
+
+### Pooling and invariance
+
+Max pooling over windows of width $K$ keeps the largest response,
+$y_{c,i} = \max_k x_{c,\, s i + k}$; *global* max pooling, over the whole
+sequence, keeps the best match of each filter anywhere. The result no longer
+depends on where the motif is: equivariance becomes **invariance**, which
+is what a "does this sequence contain the motif?" classifier needs. Average
+pooling keeps the mean response instead. The gradient of max pooling goes
+only to the position of the maximum:
+
+$$
+\bar x_{c,\, s i + k^\star} \mathrel{+}= \bar y_{c,i},
+\qquad k^\star = \arg\max_k x_{c,\, s i + k} .
+$$ {#eq-max-pool-grad}
+
+### Receptive field, stride and dilation
+
+Stacking convolutions lets later layers see longer stretches of the input:
+after $J$ layers of width $K_j$ and dilation $d_j$ (stride 1), one output
+depends on $1 + \sum_j d_j (K_j - 1)$ input positions, its *receptive
+field*. Dilation spreads the filter taps apart and grows the receptive field
+without more parameters; stride and pooling shorten the sequence, so the
+following layers cover more of the input at less cost (Exercise 9.3).
+
+### Gradients
+
+Every term of @eq-conv1d is a product of one weight and one input value, so
+the vector-Jacobian products are sums of the same products:
+
+$$
+\bar w_{o,c,k} = \sum_{n,i} \bar y_{n,o,i}\, x_{n,c,\, s i + d k}, \qquad
+\bar b_o = \sum_{n,i} \bar y_{n,o,i}, \qquad
+\bar x_{n,c,\, s i + d k} \mathrel{+}= \sum_o \bar y_{n,o,i}\, w_{o,c,k} .
+$$ {#eq-conv-grad}
+
+The weight gradient correlates the adjoint with the input; the input
+gradient is a **transposed convolution**: every output adjoint is spread
+back over the window it came from. For stride 1 it is itself a convolution,
+of the zero-padded adjoint with the flipped kernel (Exercise 9.2).
+
+### Implementation: im2col
+
+A loop over positions, as in @eq-conv1d, is slow in Python. The classical
+trick, *im2col* [@chellapilla2006high], gathers all windows into one array
+of shape $(N, C_\text{in}, L_\text{out}, K)$ and turns the convolution into
+one matrix product with the weights $(C_\text{out}, C_\text{in}, K)$.
+NumPy's `sliding_window_view` builds this array as a *view*, without
+copying, and `tensordot` contracts it. The backward pass of the input loops
+over the $K$ kernel offsets only; each iteration adds one strided slice.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+`{python} api_link("glassnn.functional.conv1d")` and
+`{python} api_link("glassnn.functional.conv2d")` both call one function for
+any number of spatial dimensions. The windows
+(`{python} src_link("glassnn.functional._windows")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.functional._windows")
+```
+
+and the convolution with its backward pass, @eq-conv-grad
+(`{python} src_link("glassnn.functional._conv")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.functional._conv")
+```
+
+Pooling uses the same windows; max pooling remembers the position of the
+first maximum of every window, @eq-max-pool-grad
+(`{python} src_link("glassnn.functional._pool")`). The modules
+`{python} api_link("glassnn.nn.Conv1d")`,
+`{python} api_link("glassnn.nn.MaxPool1d")` and
+`{python} api_link("glassnn.nn.Flatten")` wrap these functions.
+
+`{python} see_also("glassnn.nn.Conv2d", "glassnn.nn.AvgPool1d", "glassnn.functional.max_pool2d", "glassnn.functional.avg_pool2d")`
+:::
+
+::: {.callout-warning title="Differences from PyTorch"}
+- No `groups` and only zero padding (no `padding_mode`).
+- Pooling has no `dilation`, `ceil_mode`, `return_indices` or
+  `count_include_pad=False`; there are no `MaxPool2d`/`AvgPool2d` modules
+  (use the functions).
+:::
+
+The tests compare every case of convolution and pooling with a slow loop
+implementation of @eq-conv1d and with PyTorch (`tests/test_conv.py`,
+`tests/test_torch_crosscheck.py`).
+
+## Try it
+
+### A position weight matrix as a filter
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, backend, manual_seed, nn, no_grad, optim
+from glassnn.data import DataLoader
+
+
+def one_hot(sequence):
+    return np.array([[float(b == c) for b in sequence] for c in "ACGT"])
+
+
+# Score +1 for each base matching TATA, -1 otherwise.
+pwm = 2 * one_hot("TATA") - 1
+sequence = "GCTATAAGCGTATACC"
+scores = F.conv1d(Tensor(one_hot(sequence)[None]), Tensor(pwm[None]))
+print(sequence)
+print(scores.data[0, 0].astype(int))
+```
+
+The score is 4 exactly where `TATA` starts (positions 2 and 10); every
+other window scores 0 or less.
+
+### A CNN that finds a motif
+
+The data of notebook 06, with a smaller training budget: 1000 random
+sequences of length 60, half of them with the motif `TGACGTCA` planted at a
+random position.
+
+```{python}
+import sys
+
+sys.path.insert(0, "../examples")
+from dna_motifs import make_motif_dataset
+from dna_motifs import one_hot as one_hot_batch
+
+backend.set_default_dtype("float32")
+sequences, labels, positions = make_motif_dataset(2000, seed=1)
+X = one_hot_batch(sequences)
+X_train, y_train, X_test, y_test = X[:1000], labels[:1000], X[1000:], labels[1000:]
+
+manual_seed(0)
+model = nn.Sequential(
+    nn.Conv1d(4, 16, kernel_size=8),
+    nn.ReLU(),
+    nn.MaxPool1d(60 - 8 + 1),  # global max pooling
+    nn.Flatten(),
+    nn.Linear(16, 2),
+)
+optimizer = optim.Adam(model.parameters(), lr=0.003)
+for epoch in range(30):
+    for xb, yb in DataLoader(X_train, y_train, batch_size=32, shuffle=True):
+        optimizer.zero_grad()
+        F.cross_entropy(model(xb), yb).backward()
+        optimizer.step()
+
+with no_grad():
+    accuracy = (model(Tensor(X_test)).data.argmax(axis=1) == y_test).mean()
+votes = model[4].weight.data[1] - model[4].weight.data[0]
+best = int(np.argmax(votes))
+W = model[0].weight.data[best]
+print(f"test accuracy {accuracy:.3f}; filter {best} consensus:",
+      "".join("ACGT"[i] for i in W.argmax(axis=0)))
+
+fig, ax = plt.subplots(figsize=(6, 2.3))
+ax.imshow(W, cmap="RdBu_r", vmin=-np.abs(W).max(), vmax=np.abs(W).max())
+ax.set_yticks(range(4), list("ACGT"))
+ax.set_xlabel("position in the filter")
+plt.show()
+```
+
+The filter that votes most strongly for "motif present" has learned the
+motif as a position weight matrix. Notebook 06 also shows that this filter
+fires at the motif's position, and compares the CNN with the spectrum
+kernel: both are nearly perfect for the exact motif, and the CNN is better
+by about 6 to 7 points of accuracy when 10 to 20 % of the motif bases are
+mutated, because a filter scores partial matches while the spectrum kernel
+counts exact $k$-mers.
+
+## Exercises
+
+::: {.callout-tip title="Exercise 9.1: output length and 'same' padding"}
+Derive @eq-conv-length. How many zeros does `padding="same"` need for
+$K = 4$, $d = 3$, and where does GlassNN (like PyTorch) put the odd one?
+Check with `F.conv1d`.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The last window must start at most at $L' - d(K-1) - 1$ (zero-based) in the
+padded sequence of length $L'$, and windows start at $0, s, 2s, \dots$:
+$\lfloor (L' - d(K-1) - 1)/s \rfloor + 1$ windows. For $L_\text{out} = L$
+with $s = 1$ the total padding is $d(K-1) = 9$: 4 zeros on the left and 5
+on the right.
+
+```{python}
+x = Tensor(np.arange(1.0, 11.0).reshape(1, 1, 10))
+w = Tensor(np.zeros((1, 1, 4)))
+w.data[0, 0, 0] = 1.0  # picks the first tap of each window
+print(F.conv1d(x, w, padding="same", dilation=3).data)  # 4 padding zeros, then x
+```
+:::
+
+::: {.callout-tip title="Exercise 9.2: the input gradient is a convolution"}
+For stride 1, no padding and dilation 1, show from @eq-conv-grad that
+$\bar x$ is the convolution of $\bar y$, padded with $K - 1$ zeros on both
+sides, with the kernel flipped along $k$ and with input and output channels
+exchanged. Check it numerically.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$\bar x_{c,j} = \sum_o \sum_k \bar y_{o,\, j - k}\, w_{o,c,k}$ (terms with
+$j - k$ outside $[0, L_\text{out})$ are zero). With $k' = K - 1 - k$ and the
+padded adjoint $\tilde y_{o,m} = \bar y_{o,\, m - (K-1)}$, this is
+$\sum_o \sum_{k'} \tilde y_{o,\, j + k'}\, w_{o,c,K-1-k'}$: @eq-conv1d with
+weight $\tilde w_{c,o,k'} = w_{o,c,K-1-k'}$.
+
+```{python}
+backend.set_default_dtype("float64")
+rng = np.random.default_rng(0)
+x = Tensor(rng.normal(size=(2, 3, 12)), requires_grad=True)
+w = Tensor(rng.normal(size=(5, 3, 4)))
+y_bar = rng.normal(size=(2, 5, 9))
+F.conv1d(x, w).backward(y_bar)
+flipped = Tensor(np.flip(w.data, axis=2).transpose(1, 0, 2))
+as_conv = F.conv1d(Tensor(y_bar), flipped, padding=3)
+print(np.abs(as_conv.data - x.grad.data).max())
+```
+:::
+
+::: {.callout-tip title="Exercise 9.3: receptive fields"}
+A network has three convolutions of width 3 with dilations 1, 2 and 4
+(stride 1). What is the receptive field of one output? How many parameters
+do the three layers have with 16 channels each (and 4 input channels), and
+how many would a single convolution with the same receptive field have?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$1 + 2(1 + 2 + 4) = 15$ positions. Parameters:
+$16 \cdot 4 \cdot 3 + 16 + 2 (16 \cdot 16 \cdot 3 + 16) = 1776$. A single
+layer of width 15 from 4 to 16 channels has $16 \cdot 4 \cdot 15 + 16 = 976$
+parameters, fewer, but it computes only one linear filter per output
+channel; the stack has two more nonlinearities and grows its receptive
+field exponentially with depth when the dilations double.
+
+```{python}
+stack = nn.Sequential(
+    nn.Conv1d(4, 16, 3, dilation=1), nn.ReLU(),
+    nn.Conv1d(16, 16, 3, dilation=2), nn.ReLU(),
+    nn.Conv1d(16, 16, 3, dilation=4),
+)
+x = Tensor(np.zeros((1, 4, 40)), requires_grad=True)
+stack(x)[0, :, 10].sum().backward()  # one output position
+touched = np.flatnonzero(np.abs(x.grad.data).sum(axis=(0, 1)))
+print("input positions that reach output 10:", touched.min(), "to", touched.max())
+print("parameters:", sum(p.data.size for p in stack.parameters()))
+```
+:::
+
+::: {.callout-tip title="Exercise 9.4: average against max pooling"}
+In the motif CNN above, replace `nn.MaxPool1d(53)` by `nn.AvgPool1d(53)`
+and train again. Compare the test accuracies and explain the difference.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+backend.set_default_dtype("float32")
+
+
+def train_motif_cnn(pool):
+    manual_seed(0)
+    net = nn.Sequential(nn.Conv1d(4, 16, 8), nn.ReLU(), pool, nn.Flatten(), nn.Linear(16, 2))
+    opt = optim.Adam(net.parameters(), lr=0.003)
+    for _ in range(30):
+        for xb, yb in DataLoader(X_train, y_train, batch_size=32, shuffle=True):
+            opt.zero_grad()
+            F.cross_entropy(net(xb), yb).backward()
+            opt.step()
+    with no_grad():
+        return (net(Tensor(X_test)).data.argmax(axis=1) == y_test).mean()
+
+
+print("max pooling:    ", train_motif_cnn(nn.MaxPool1d(53)))
+print("average pooling:", train_motif_cnn(nn.AvgPool1d(53)))
+```
+
+One motif occurrence changes one of 53 window scores. The maximum reacts
+fully to it; the average dilutes it by a factor 53 among the responses to
+random windows, whose fluctuation from sequence to sequence is of the same
+order, so the signal is harder to separate: here the accuracy drops from
+about 0.996 to 0.89.
+:::
+
+## Notes and references
+
+- This chapter supports lecture 11 of *Advanced Machine Learning*
+  (convolutional networks for sequences), and builds on the spectrum kernel
+  of lecture 5.
+- Convolutional networks and weight sharing: @lecun1998gradient. The im2col
+  formulation: @chellapilla2006high.
+- CNNs on DNA and RNA: DeepBind [@alipanahi2015predicting] learns binding
+  motifs from sequences; DeepSEA [@zhou2015predicting] predicts chromatin
+  features and the effects of non-coding variants.
+- Example notebook `06_cnn_dna_motif`.
