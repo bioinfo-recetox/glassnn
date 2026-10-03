@@ -1,0 +1,369 @@
+# Memorization and double descent {#sec-memorization}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, src_link
+```
+
+## Goals
+
+- Explain why a network that can fit random labels makes uniform
+  generalization bounds based on the hypothesis class vacuous.
+- Describe double descent: the test error as a function of model size,
+  beyond the interpolation threshold.
+- Derive the minimum-norm solution of an under-determined least-squares
+  problem, and show that gradient descent from zero finds it.
+- Reproduce both phenomena with small experiments (example notebooks 03
+  and 05).
+
+## Theory
+
+### Classical expectations
+
+The classical picture of model selection is a U-shaped test error: a small
+model underfits (high bias), a large one overfits (high variance), and the
+best model lies in between. Uniform convergence makes this quantitative.
+For a class $\mathcal F$ of functions with values in $[-1, 1]$ and a sample
+$S$ of size $n$, the empirical Rademacher complexity
+
+$$
+\hat{\mathfrak R}_S(\mathcal F) = \E_\sigma \Bigl[ \sup_{f \in \mathcal F}
+\frac1n \sum_{i=1}^n \sigma_i f(x_i) \Bigr],
+\qquad \sigma_i \in \{-1, +1\} \text{ uniform},
+$$ {#eq-rademacher}
+
+measures how well $\mathcal F$ can correlate with random signs, and with
+high probability the gap between the risk and the empirical risk of every
+$f \in \mathcal F$ is at most of order
+$\hat{\mathfrak R}_S(\mathcal F) + \sqrt{\log(1/\delta)/n}$ (lecture 2).
+
+### Fitting random labels
+
+@zhang2017understanding trained standard image classifiers on data whose
+labels had been replaced by random ones. The networks reached zero training
+error, with test error at chance, using the same architecture,
+optimizer and hyper-parameters that generalize well on the true labels.
+Fitting random signs exactly means that the supremum in @eq-rademacher is
+1 for (almost) every $\sigma$, so $\hat{\mathfrak R}_S = 1$, and the bound
+says nothing: the capacity of the class reachable by training does not
+explain why the same networks generalize on real labels. Explicit
+regularization (weight decay, dropout) changed this only little; the
+explanation must involve the data and the training algorithm, not only the
+class.
+
+### Double descent
+
+@belkin2019reconciling observed that the U-curve is only the first part of
+the story. As the number of parameters $p$ grows beyond the number of
+samples $n$, the model can *interpolate* the training data, the training
+error is zero, and the test error, after a peak at the *interpolation
+threshold* $p \approx n$, decreases again, often to below the best
+under-parametrized value. @nakkiran2020deep found the same shape in deep
+networks as a function of width, of the number of training epochs, and of
+the number of samples (more data can hurt near the threshold).
+
+The simplest model that shows it is regression on random features
+[@rahimi2007random]: a fixed random map
+$\phi(x) = \operatorname{relu}(W x + b) \in \R^p$ and a linear readout
+$\theta$ fitted by least squares on the feature matrix
+$\Phi \in \R^{n \times p}$. For $p < n$ the least-squares solution is
+unique. For $p \ge n$ there are infinitely many interpolating solutions,
+and the natural choice is the one with the smallest norm,
+
+$$
+\theta^\dagger = \Phi^{+} y
+= \Phi^\top (\Phi \Phi^\top)^{-1} y \quad (p \ge n,\ \operatorname{rank}\Phi = n),
+\qquad
+\lVert \theta^\dagger \rVert^2 = \sum_{k=1}^{n} \frac{(u_k^\top y)^2}{s_k^2},
+$$ {#eq-min-norm}
+
+where $\Phi = \sum_k s_k u_k v_k^\top$ is the singular value decomposition
+and $\Phi^+$ the pseudo-inverse. Near $p = n$ the smallest singular value
+$s_n$ of a random $n \times p$ matrix is close to 0, so fitting the noise in
+$y$ requires a huge $\lVert\theta^\dagger\rVert$, and the predictions on new
+points are wild: this is the peak. For $p \gg n$, all singular values are
+bounded away from 0, and the noise is spread over many directions of
+feature space where it does little harm. @bartlett2020benign characterize
+when minimum-norm interpolation is even consistent ("benign overfitting"):
+the data must have many directions of small variance that absorb the noise.
+
+### The implicit bias of gradient descent
+
+Gradient descent on $\frac12 \lVert \Phi\theta - y \rVert^2$ from
+$\theta_0 = 0$ finds $\theta^\dagger$ without being told to. Every gradient
+$\Phi^\top(\Phi\theta - y)$ lies in the row space of $\Phi$, so all iterates
+do too; the limit interpolates (for a small enough step), and the only
+interpolating solution in the row space is $\theta^\dagger$
+(Exercise 7.1). The training algorithm, not only the model class, decides
+which interpolating solution we get. For deep networks the implicit bias
+is not known in general, but this linear case is exact for the readout of
+random features and, in the lazy regime of @sec-ntk, approximately for a
+whole wide network.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+These phenomena need no new library code; they are experiments with what
+earlier chapters built. The random features are an untrained
+`{python} api_link("glassnn.nn.Linear")` followed by
+`{python} api_link("glassnn.nn.ReLU")`, evaluated under
+`{python} api_link("glassnn.no_grad")`; the minimum-norm readout is
+`numpy.linalg.pinv`. The memorization experiments train an MLP with
+`{python} api_link("glassnn.optim.AdamW")`, whose decoupled weight decay is
+the shrinkage of @eq-weight-decay
+(`{python} src_link("glassnn.optim.Adam.step")`).
+
+The full experiments, with more seeds and more settings, are the example
+notebooks
+[`03_double_descent`](https://github.com/bioinfo-recetox/glassnn/blob/main/examples/03_double_descent.ipynb)
+and
+[`05_memorizing_noise`](https://github.com/bioinfo-recetox/glassnn/blob/main/examples/05_memorizing_noise.ipynb).
+Their expected findings are asserted, at a smaller scale, by
+`tests/test_examples.py`, so they are checked on every change of the
+library.
+:::
+
+## Try it
+
+### Double descent with random features
+
+The setting of notebook 03: a sparse linear signal in 20 dimensions with
+noise standard deviation 0.1, $n = 100$ training samples, and $p$ random
+ReLU features.
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, backend, manual_seed, nn, no_grad, optim
+from glassnn.data import DataLoader
+
+backend.set_default_dtype("float64")
+
+
+def sparse_regression(n, seed, d=20, k=5, noise=0.1):
+    rng = np.random.default_rng(seed)
+    beta = np.zeros(d)
+    beta[:k] = 1 / np.sqrt(k)
+    X = rng.normal(size=(n, d))
+    return X, X @ beta + noise * rng.normal(size=n)
+
+
+N_TRAIN = 100
+X_train, y_train = sparse_regression(N_TRAIN, seed=0)
+X_test, y_test = sparse_regression(2000, seed=1)
+
+
+def random_features(p, seed):
+    manual_seed(seed)
+    features = nn.Sequential(nn.Linear(20, p), nn.ReLU())
+    with no_grad():
+        return features(Tensor(X_train)).data, features(Tensor(X_test)).data
+
+
+def test_error(p, seed):
+    phi_train, phi_test = random_features(p, seed)
+    theta = np.linalg.pinv(phi_train) @ y_train
+    return np.mean((phi_test @ theta - y_test) ** 2)
+
+
+widths = np.unique(np.r_[np.geomspace(5, 3000, 25).round().astype(int), N_TRAIN])
+errors = [np.median([test_error(p, seed) for seed in range(5)]) for p in widths]
+
+plt.figure(figsize=(6, 3.5))
+plt.loglog(widths, errors, "o-", markersize=3)
+plt.axvline(N_TRAIN, color="gray", linestyle=":")
+plt.xlabel("number of random features $p$")
+plt.ylabel("test MSE (median of 5 seeds)")
+plt.show()
+```
+
+The test error peaks at $p = n = 100$ and then falls to below its best
+value for $p < n$.
+
+### Gradient descent finds the minimum-norm solution
+
+With $p = 300 > n$, gradient descent on the readout from $\theta = 0$, here
+written with GlassNN tensors, converges to the pseudo-inverse solution:
+
+```{python}
+phi_train, _ = random_features(300, seed=0)
+theta_dagger = np.linalg.pinv(phi_train) @ y_train
+
+Phi, y = Tensor(phi_train), Tensor(y_train)
+theta = Tensor(np.zeros(300), requires_grad=True)
+step = 1.0 / np.linalg.norm(phi_train, 2) ** 2  # below 2 / largest eigenvalue
+for _ in range(20000):
+    theta.grad = None
+    (0.5 * ((Phi @ theta - y) ** 2).sum()).backward()
+    theta = Tensor(theta.data - step * theta.grad.data, requires_grad=True)
+
+print("training residual:      ", np.abs(phi_train @ theta.data - y_train).max())
+print("distance to pinv(Φ) y:  ", np.linalg.norm(theta.data - theta_dagger))
+print("norms (GD, pinv):       ", np.linalg.norm(theta.data), np.linalg.norm(theta_dagger))
+```
+
+### Memorizing random labels
+
+The setting of notebook 05: 200 Gaussian points in 20 dimensions, labels
+given by a hyperplane, and an MLP with two hidden layers of width 256
+(about 72 000 parameters), trained with AdamW.
+
+```{python}
+backend.set_default_dtype("float32")
+rng = np.random.default_rng(0)
+w_star = rng.normal(size=20)
+
+
+def sample(n):
+    X = rng.normal(size=(n, 20))
+    return X, (X @ w_star > 0).astype(np.int64)
+
+
+X_tr, y_tr = sample(200)
+X_te, y_te = sample(2000)
+y_random = rng.integers(0, 2, size=200)
+
+
+def accuracy(model, X, y):
+    with no_grad():
+        return float((model(Tensor(X)).data.argmax(axis=1) == y).mean())
+
+
+def train(labels, epochs=40):
+    manual_seed(0)
+    model = nn.Sequential(
+        nn.Linear(20, 256), nn.ReLU(), nn.Linear(256, 256), nn.ReLU(), nn.Linear(256, 2)
+    )
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.0)
+    history = []
+    for _ in range(epochs):
+        for xb, yb in DataLoader(X_tr, labels, batch_size=32, shuffle=True):
+            optimizer.zero_grad()
+            F.cross_entropy(model(xb), yb).backward()
+            optimizer.step()
+        history.append((accuracy(model, X_tr, labels), accuracy(model, X_te, y_te)))
+    return np.array(history)
+
+
+fig, ax = plt.subplots(figsize=(6, 3.5))
+for labels, name in [(y_tr, "true labels"), (y_random, "random labels")]:
+    history = train(labels)
+    ax.plot(history[:, 0], label=f"{name}: train")
+    ax.plot(history[:, 1], "--", label=f"{name}: test")
+ax.set_xlabel("epoch")
+ax.set_ylabel("accuracy")
+ax.legend(fontsize=8)
+plt.show()
+```
+
+Both label sets are fitted perfectly, the random ones about three times
+more slowly; on the random labels the test accuracy stays at chance.
+Notebook 05 adds partially corrupted labels, weight decay and early
+stopping: only a very strong weight decay prevents the memorization of
+random labels, and with 30 % flipped labels the validation accuracy is best
+before the training accuracy reaches 100 %.
+
+## Exercises
+
+::: {.callout-tip title="Exercise 7.1: gradient descent from zero"}
+Let $\Phi \in \R^{n\times p}$ with $p > n$ have rank $n$. (a) Show that
+$\theta^\dagger = \Phi^\top(\Phi\Phi^\top)^{-1}y$ interpolates and has the
+smallest norm among all interpolating $\theta$. (b) Show that gradient
+descent on $\frac12\lVert\Phi\theta - y\rVert^2$ from $\theta_0 = 0$ with
+step $\eta < 2/s_1^2$ converges to $\theta^\dagger$.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+(a) $\Phi\theta^\dagger = y$. Any interpolating $\theta$ is
+$\theta^\dagger + v$ with $\Phi v = 0$; $\theta^\dagger = \Phi^\top a$ lies
+in the row space, so $v \perp \theta^\dagger$ and
+$\lVert\theta\rVert^2 = \lVert\theta^\dagger\rVert^2 + \lVert v\rVert^2$.
+(b) Each update adds $-\eta\Phi^\top(\Phi\theta_t - y)$, a vector of the
+row space, so $\theta_t = \Phi^\top a_t$ for all $t$. The residual
+$r_t = \Phi\theta_t - y$ obeys $r_{t+1} = (I - \eta\Phi\Phi^\top) r_t$,
+which tends to 0 when all eigenvalues $s_k^2$ of $\Phi\Phi^\top$ satisfy
+$|1 - \eta s_k^2| < 1$. The limit interpolates and lies in the row space,
+and $\theta^\dagger$ is the only such vector.
+:::
+
+::: {.callout-tip title="Exercise 7.2: ridge against the peak"}
+Replace the minimum-norm readout by ridge regression,
+$\theta_\lambda = (\Phi^\top\Phi + \lambda I)^{-1}\Phi^\top y$, for
+$\lambda \in \{10^{-3}, 10^{-1}, 1\}$, and plot the test error against $p$.
+*Hint:* $\theta_\lambda = \Phi^\top(\Phi\Phi^\top + \lambda I)^{-1} y$
+needs only an $n \times n$ solve.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+backend.set_default_dtype("float64")
+fig, ax = plt.subplots(figsize=(6, 3.5))
+for lam in [0.0, 1e-3, 1e-1, 1.0]:
+    curve = []
+    for p in widths:
+        errors_p = []
+        for seed in range(5):
+            phi_train, phi_test = random_features(p, seed)
+            if lam == 0.0:
+                theta = np.linalg.pinv(phi_train) @ y_train
+            else:  # the n x n form of the hint
+                gram = phi_train @ phi_train.T + lam * np.eye(N_TRAIN)
+                theta = phi_train.T @ np.linalg.solve(gram, y_train)
+            errors_p.append(np.mean((phi_test @ theta - y_test) ** 2))
+        curve.append(np.median(errors_p))
+    ax.loglog(widths, curve, "o-", markersize=3, label=rf"$\lambda = {lam}$")
+ax.axvline(N_TRAIN, color="gray", linestyle=":")
+ax.set_xlabel("$p$")
+ax.set_ylabel("test MSE")
+ax.legend()
+plt.show()
+```
+
+The penalty bounds $\lVert\theta\rVert$ and removes the peak; with
+$\lambda = 1$ the test error decreases with $p$ throughout. A tiny
+$\lambda$ only lowers the peak. The peak is a property of the
+*unregularized* interpolating solution.
+:::
+
+::: {.callout-tip title="Exercise 7.3: when more data hurts"}
+Fix $p = 200$ and vary the number of training samples
+$n \in \{50, 100, 150, 190, 200, 210, 300, 600\}$. Plot the test error of
+the minimum-norm solution against $n$.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The test error has a peak at $n = p = 200$: with 100 samples it is about
+0.08, with 190 about 1, with 200 about 10, and it falls again for larger
+$n$. Near the interpolation threshold, more data makes the model *worse*:
+sample-wise double descent [@nakkiran2020deep].
+:::
+
+::: {.callout-tip title="Exercise 7.4: Rademacher complexity of the trained network"}
+Use the random-label experiment to estimate the empirical Rademacher
+complexity of "the functions this training procedure can reach": draw a
+few sign vectors $\sigma$, train on them, and compute
+$\frac1n\sum_i\sigma_i f(x_i)$ with $f = $ the sign of the predicted class
+score. What value do you get, and what does it mean for the bound?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The network fits every $\sigma$ perfectly, so each term is 1 and the
+estimate is 1, the largest possible value. A bound of the form
+"risk $\le$ empirical risk $+ 2\hat{\mathfrak R}_S + \dots$" is then larger
+than 1 and says nothing about the classifier trained on the true labels,
+although its test accuracy is about 0.89.
+:::
+
+## Notes and references
+
+- This chapter supports lecture 10 of *Advanced Machine Learning*
+  (generalization in deep learning), and builds on the Rademacher bounds of
+  lecture 2.
+- Random labels: @zhang2017understanding. Double descent:
+  @belkin2019reconciling, @nakkiran2020deep. Benign overfitting:
+  @bartlett2020benign. Random features: @rahimi2007random.
+- Example notebooks: `03_double_descent` and `05_memorizing_noise`.

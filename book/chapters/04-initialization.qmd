@@ -117,14 +117,20 @@ show_source("glassnn.nn.init._kaiming_std")
 show_source("glassnn.nn.init.kaiming_normal_")
 ```
 
-The default of `Linear` (`{python} src_link("glassnn.nn.Linear.reset_parameters")`):
+The default of `Linear` (`{python} src_link("glassnn.nn.Linear.reset_parameters")`;
+the branch for the NTK parametrization is the subject of @sec-ntk):
 
 ```{python}
 #| echo: false
 show_source("glassnn.nn.Linear.reset_parameters")
 ```
 
-`{python} see_also("glassnn.nn.init.xavier_uniform_", "glassnn.nn.init.kaiming_uniform_", "glassnn.nn.init.calculate_gain", "glassnn.nn.Module.apply")`
+The measurement of the next section, the standard deviation of the
+pre-activations layer by layer, is available for any `Sequential` as
+`{python} api_link("glassnn.analysis.activation_stats")`; example notebook
+`02_init_and_depth` uses it.
+
+`{python} see_also("glassnn.nn.init.xavier_uniform_", "glassnn.nn.init.kaiming_uniform_", "glassnn.nn.init.calculate_gain", "glassnn.nn.Module.apply", "glassnn.analysis.activation_stats")`
 :::
 
 ## Try it
