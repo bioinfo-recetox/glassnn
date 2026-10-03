@@ -9,6 +9,8 @@ glassnn.nn
    glassnn.nn.module
    glassnn.nn.parameter
    glassnn.nn.linear
+   glassnn.nn.dropout
+   glassnn.nn.normalization
    glassnn.nn.activation
    glassnn.nn.loss
    glassnn.nn.init

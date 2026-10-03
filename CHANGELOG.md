@@ -70,6 +70,36 @@ annotated git tags.
 - scikit-learn added to the `dev`, `book` and `examples` extras (not a
   runtime dependency).
 
+- Milestone M3 (generalization tools): `glassnn.functional.dropout`
+  (inverted dropout, optional `generator=`), `layer_norm` and `batch_norm`
+  (shared standardization op with an explicit backward pass; running
+  statistics with unbiased variance); modules `nn.Dropout`, `nn.LayerNorm`,
+  `nn.BatchNorm1d` (inputs `(N, C)` and `(N, C, L)`).
+- `Module.register_buffer`, `buffers`, `named_buffers`; `state_dict` and
+  `load_state_dict` include buffers (after the parameters).
+- `nn.Linear(parametrization="ntk")`: weights and bias from N(0, 1), weight
+  scaled by `1/sqrt(in_features)` in the forward pass.
+- `glassnn.analysis`: `count_parameters`, `activation_stats` (walks a
+  `Sequential`, returns `LayerStats(mean, std)` per `Linear`), and
+  `empirical_ntk` (one backward pass per example; existing gradients are
+  restored).
+- Example notebooks `01_autodiff` to `05_memorizing_noise` in `examples/`,
+  executed by a new CI job (`examples/_execute.py`); their expected findings
+  are asserted in `tests/test_examples.py`. `nbclient` and `nbformat` added
+  to the `examples` extra.
+- PyTorch cross-checks for `LayerNorm`, `BatchNorm1d` (three training steps
+  with running statistics, then evaluation), dropout scaling and the
+  `BatchNorm1d` state-dict keys.
+- Book: chapter 6 (regularization), chapter 7 (memorization and double
+  descent), chapter 8 (the neural tangent kernel and lazy training);
+  chapter 4 points to `activation_stats`. API pages for
+  `glassnn.nn.dropout`, `glassnn.nn.normalization`, `glassnn.analysis`
+  (the "planned modules" page is removed).
+- Verified references: Srivastava et al. 2014, Ioffe and Szegedy 2015, Ba
+  et al. 2016, Zhang et al. 2017, Belkin et al. 2019, Nakkiran et al. 2020,
+  Bartlett et al. 2020, Jacot et al. 2018, Chizat et al. 2019, Lee et al.
+  2019, Rahimi and Recht 2007.
+
 ### Differences from PyTorch
 
 - Optimizers have one parameter group; the learning rate is `optimizer.lr`.
@@ -85,6 +115,11 @@ annotated git tags.
   float64).
 - The graph is kept after `backward()` (no `retain_graph` needed).
 - `Tensor.numpy()` returns a copy.
+- `BatchNorm1d` has no `num_batches_tracked` buffer and no `momentum=None`;
+  `register_buffer` has no `persistent` argument; `Dropout` has no
+  `inplace`; `F.dropout` accepts `generator=`.
+- `Linear` has a `parametrization` argument; `glassnn.analysis` has no
+  PyTorch counterpart.
 
 ## Later
 

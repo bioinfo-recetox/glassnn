@@ -29,6 +29,18 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run pytest --cov --cov-report=term-missing
 
+  examples:
+    # Execute the example notebooks (examples/_execute.py); their expected
+    # findings are asserted at a smaller scale in tests/test_examples.py.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10.2.0  # no floating major tag upstream
+      - run: uv sync --extra examples
+      - run: uv run python examples/_execute.py
+
   torch:
     # PyTorch cross-checks. torch is installed from the CPU wheel index,
     # outside the lock file: it is never a dependency of glassnn.

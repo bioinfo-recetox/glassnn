@@ -15,15 +15,20 @@ from glassnn.nn.activation import (
     Softplus,
     Tanh,
 )
+from glassnn.nn.dropout import Dropout
 from glassnn.nn.linear import Linear
 from glassnn.nn.loss import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from glassnn.nn.module import Module, Sequential
+from glassnn.nn.normalization import BatchNorm1d, LayerNorm
 from glassnn.nn.parameter import Parameter
 
 __all__ = [
     "GELU",
     "BCEWithLogitsLoss",
+    "BatchNorm1d",
     "CrossEntropyLoss",
+    "Dropout",
+    "LayerNorm",
     "LeakyReLU",
     "Linear",
     "LogSoftmax",

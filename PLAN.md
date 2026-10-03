@@ -307,5 +307,9 @@ Software
 | 21 | `clip_grad_norm_` | in `glassnn.optim` (PyTorch: `torch.nn.utils`); documented as a difference |
 | 22 | Toy datasets | scikit-learn in the `dev`, `book` and `examples` extras (never a runtime dependency) |
 | 23 | Generator before `manual_seed` | unseeded (like `numpy.random.default_rng()`); tests, examples and the book always seed |
+| 24 | Non-learnable state | `Module.register_buffer`, `buffers()`, `named_buffers()`; `state_dict()`/`load_state_dict()` include buffers (as in PyTorch). `BatchNorm1d` has no `num_batches_tracked` (documented difference) |
+| 25 | Bias in `Linear(parametrization="ntk")` | $z = x W^\top/\sqrt{n_\text{in}} + b$ with $W, b \sim \mathcal N(0, 1)$ (Lee et al. 2019 with $\sigma_w = \sigma_b = 1$); no extra argument |
+| 26 | `activation_stats` | walks a (nested) `Sequential` and records the outputs of its `Linear` layers (later also convolutions); no forward hooks; other models raise `TypeError` |
+| 27 | Example 03 (double descent) | random ReLU features (a frozen GlassNN `Linear`) with the minimum-norm least-squares readout (Rahimi and Recht 2007) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.

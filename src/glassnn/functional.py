@@ -1,4 +1,4 @@
-r"""Stateless operations: activations, softmax and friends, losses, ``linear``.
+r"""Stateless operations: activations, softmax, losses, dropout, normalization.
 
 Import it as ``import glassnn.functional as F``, the same way as
 ``torch.nn.functional``. Every function takes and returns tensors. Functions
@@ -7,8 +7,9 @@ their parts have their own backward function, written in the docstring with
 the adjoint notation of :mod:`glassnn.tensor`; the others are compositions of
 tensor operations and need no backward of their own.
 
-Book chapter: :book:`Backpropagation in a multilayer perceptron
-<chapters/03-mlp.html>`.
+Book chapters: :book:`Backpropagation in a multilayer perceptron
+<chapters/03-mlp.html>`; dropout and normalization:
+:book:`Regularization <chapters/06-regularization.html>`.
 """
 
 import math
@@ -18,9 +19,12 @@ from glassnn import backend
 from glassnn.tensor import Tensor, _result
 
 __all__ = [
+    "batch_norm",
     "binary_cross_entropy_with_logits",
     "cross_entropy",
+    "dropout",
     "gelu",
+    "layer_norm",
     "leaky_relu",
     "linear",
     "log_softmax",
@@ -329,6 +333,274 @@ def linear(input: Tensor, weight: Tensor, bias: Tensor | None = None) -> Tensor:
     if bias is not None:
         out = out + bias
     return out
+
+
+# ----------------------------------------------------------------------
+# Dropout and normalization
+# ----------------------------------------------------------------------
+
+
+def dropout(
+    input: Tensor, p: float = 0.5, training: bool = True, generator: Any = None
+) -> Tensor:
+    r"""Inverted dropout: zero each element with probability ``p``.
+
+    With a random mask :math:`m_i \sim \text{Bernoulli}(1 - p)`, drawn anew
+    at every call,
+
+    .. math:: z = \frac{m \odot a}{1 - p}, \qquad
+        \bar a = \frac{m \odot \bar z}{1 - p} .
+
+    Dividing by :math:`1 - p` keeps :math:`\mathbb E[z] = a`, so nothing has
+    to be rescaled at evaluation time, when dropout is the identity
+    :cite:p:`srivastava2014dropout`.
+
+    Args:
+        input: Any shape.
+        p: The probability of zeroing an element, in :math:`[0, 1]`.
+        training: If ``False`` (evaluation), ``input`` is returned unchanged.
+        generator: The random generator; ``None`` uses the global one (see
+            :func:`glassnn.backend.manual_seed`).
+
+    Returns:
+        The same shape and dtype as ``input``.
+
+    Raises:
+        ValueError: If ``p`` is not in :math:`[0, 1]`.
+
+    Note:
+        Differences from PyTorch: there is no ``inplace`` argument; the
+        ``generator`` argument does not exist in ``torch.nn.functional``.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor, manual_seed
+        >>> _ = manual_seed(0)
+        >>> F.dropout(Tensor([1.0, 1.0, 1.0, 1.0]), p=0.5)
+        Tensor([2., 0., 0., 0.])
+    """
+    if not 0.0 <= p <= 1.0:
+        raise ValueError(f"The dropout probability must be in [0, 1], got {p}.")
+    if not training or p == 0.0:
+        return input
+    if generator is None:
+        generator = backend.get_generator()
+    keep = generator.random(input.shape) >= p
+    scale = 0.0 if p == 1.0 else 1.0 / (1.0 - p)
+    mask = (keep * scale).astype(input.dtype)
+    return _result(input.data * mask, (input,), lambda grad: (grad * mask,), "dropout")
+
+
+def _standardize(input: Tensor, axes: tuple[int, ...], eps: float) -> Tensor:
+    r"""Subtract the mean and divide by the standard deviation over ``axes``.
+
+    With :math:`\mu` and :math:`\sigma^2` the mean and the (biased) variance
+    of the :math:`m` elements that share a mean,
+
+    .. math:: \hat x = \frac{x - \mu}{\sqrt{\sigma^2 + \varepsilon}},
+        \qquad \bar x = \frac{1}{\sqrt{\sigma^2 + \varepsilon}} \Bigl(\bar{\hat x}
+        - \operatorname{mean}(\bar{\hat x})
+        - \hat x \operatorname{mean}(\bar{\hat x} \odot \hat x)\Bigr),
+
+    with the means taken over ``axes``. The two subtracted terms remove the
+    parts of :math:`\bar{\hat x}` that would change :math:`\mu` and
+    :math:`\sigma`, which are both functions of :math:`x`
+    :cite:p:`ioffe2015batch`.
+
+    The mean is subtracted before squaring (two passes), so a large common
+    offset does not destroy the variance by cancellation.
+    """
+    xp = backend.xp
+    x = input.data
+    mean = x.mean(axis=axes, keepdims=True)
+    centered = x - mean
+    var = (centered**2).mean(axis=axes, keepdims=True)
+    inv_std = 1 / xp.sqrt(var + eps)
+    x_hat = centered * inv_std
+
+    def backward(grad):
+        grad_mean = grad.mean(axis=axes, keepdims=True)
+        projection = (grad * x_hat).mean(axis=axes, keepdims=True)
+        return (inv_std * (grad - grad_mean - x_hat * projection),)
+
+    return _result(x_hat, (input,), backward, "standardize")
+
+
+def layer_norm(
+    input: Tensor,
+    normalized_shape: tuple[int, ...],
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
+    eps: float = 1e-5,
+) -> Tensor:
+    r"""Layer normalization: standardize each sample over its last dimensions.
+
+    .. math:: y = \frac{x - \mu}{\sqrt{\sigma^2 + \varepsilon}} \odot \gamma + \beta,
+
+    where :math:`\mu` and :math:`\sigma^2` (biased) are computed over the
+    last ``len(normalized_shape)`` dimensions of every sample separately
+    :cite:p:`ba2016layer`. The statistics do not depend on the other
+    samples of the batch, so training and evaluation behave the same. The
+    gradient of the standardization is written in the docstring of
+    ``_standardize`` (see the source); :math:`\gamma, \beta` act by ``*``
+    and ``+``.
+
+    Args:
+        input: Shape ``(..., *normalized_shape)``.
+        normalized_shape: The trailing shape over which to normalize.
+        weight: :math:`\gamma`, shape ``normalized_shape``, or ``None``.
+        bias: :math:`\beta`, shape ``normalized_shape``, or ``None``.
+        eps: :math:`\varepsilon`, added to the variance.
+
+    Returns:
+        The same shape as ``input``.
+
+    Raises:
+        ValueError: If the trailing shape of ``input`` is not
+            ``normalized_shape`` (the message names both).
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.layer_norm(Tensor([[1.0, 3.0]]), (2,))
+        Tensor([[-0.999995,  0.999995]])
+    """
+    normalized_shape = tuple(normalized_shape)
+    k = len(normalized_shape)
+    if input.shape[input.ndim - k :] != normalized_shape:
+        raise ValueError(
+            f"layer_norm over the trailing shape {normalized_shape} needs an "
+            f"input that ends with it, got shape {input.shape}."
+        )
+    out = _standardize(input, tuple(range(input.ndim - k, input.ndim)), eps)
+    if weight is not None:
+        out = out * weight
+    if bias is not None:
+        out = out + bias
+    return out
+
+
+def batch_norm(
+    input: Tensor,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
+    training: bool = False,
+    momentum: float = 0.1,
+    eps: float = 1e-5,
+) -> Tensor:
+    r"""Batch normalization: standardize each channel over the batch.
+
+    For input of shape ``(N, C)`` or ``(N, C, L)``, channel :math:`c` is
+    standardized with the mean :math:`\mu_c` and the (biased) variance
+    :math:`\sigma_c^2` over all its :math:`m = N` (or :math:`N L`) values,
+
+    .. math:: y = \frac{x - \mu_c}{\sqrt{\sigma_c^2 + \varepsilon}}\, \gamma_c
+        + \beta_c ,
+
+    :cite:p:`ioffe2015batch`. In training, the batch statistics are used
+    (and depend on the other samples, so the gradient flows through them;
+    see ``_standardize``), and the running statistics are updated as
+
+    .. math:: \hat\mu \leftarrow (1 - \rho)\, \hat\mu + \rho\, \mu_c,
+        \qquad \hat\sigma^2 \leftarrow (1 - \rho)\, \hat\sigma^2
+        + \rho\, \frac{m}{m - 1}\, \sigma_c^2
+
+    with :math:`\rho` the ``momentum`` (the running variance is unbiased).
+    In evaluation, :math:`\hat\mu, \hat\sigma^2` replace the batch
+    statistics, and the layer is a fixed affine map of each sample.
+
+    Args:
+        input: Shape ``(N, C)`` or ``(N, C, L)``.
+        running_mean: :math:`\hat\mu`, shape ``(C,)``, or ``None``.
+        running_var: :math:`\hat\sigma^2`, shape ``(C,)``, or ``None``.
+        weight: :math:`\gamma`, shape ``(C,)``, or ``None``.
+        bias: :math:`\beta`, shape ``(C,)``, or ``None``.
+        training: Use (and update) batch statistics. Without running
+            statistics, batch statistics are used in evaluation too.
+        momentum: :math:`\rho`.
+        eps: :math:`\varepsilon`, added to the variance.
+
+    Returns:
+        The same shape as ``input``.
+
+    Raises:
+        ValueError: For an input that is not 2-D or 3-D, statistics or
+            affine parameters of the wrong shape, or a channel with a single
+            value in training.
+
+    Note:
+        Like PyTorch, this function updates ``running_mean`` and
+        ``running_var`` in place: their ``.data`` is replaced. These buffers
+        are not learned, and no gradient flows through them.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.batch_norm(Tensor([[1.0], [3.0]]), None, None, training=True)
+        Tensor([[-0.999995],
+                [ 0.999995]])
+    """
+    if input.ndim not in (2, 3):
+        raise ValueError(
+            f"batch_norm needs an input of shape (N, C) or (N, C, L), "
+            f"got {input.shape}."
+        )
+    channels = input.shape[1]
+    for name, tensor in [
+        ("running_mean", running_mean),
+        ("running_var", running_var),
+        ("weight", weight),
+        ("bias", bias),
+    ]:
+        if tensor is not None and tensor.shape != (channels,):
+            raise ValueError(
+                f"An input with {channels} channels needs {name} of shape "
+                f"({channels},), got {tensor.shape}."
+            )
+    axes = (0,) if input.ndim == 2 else (0, 2)
+    per_channel = (channels,) if input.ndim == 2 else (channels, 1)
+    use_batch = training or running_mean is None or running_var is None
+    if use_batch:
+        m = input.data.size // max(channels, 1)
+        if m <= 1:
+            raise ValueError(
+                "batch_norm in training needs more than one value per channel, "
+                f"got an input of shape {input.shape}."
+            )
+        out = _standardize(input, axes, eps)
+        if training and running_mean is not None and running_var is not None:
+            _update_running_stats(input, axes, m, running_mean, running_var, momentum)
+    else:
+        assert running_mean is not None and running_var is not None
+        mean = running_mean.data.reshape(per_channel)
+        inv_std = 1 / backend.xp.sqrt(running_var.data.reshape(per_channel) + eps)
+        out = (input - Tensor(mean, dtype=input.dtype)) * Tensor(
+            inv_std, dtype=input.dtype
+        )
+    if weight is not None:
+        out = out * weight.reshape(per_channel)
+    if bias is not None:
+        out = out + bias.reshape(per_channel)
+    return out
+
+
+def _update_running_stats(
+    input: Tensor,
+    axes: tuple[int, ...],
+    m: int,
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+) -> None:
+    """Move the running statistics towards the statistics of this batch."""
+    mean = input.data.mean(axis=axes)
+    unbiased_var = input.data.var(axis=axes) * m / (m - 1)
+    new_mean = (1 - momentum) * running_mean.data + momentum * mean
+    new_var = (1 - momentum) * running_var.data + momentum * unbiased_var
+    running_mean.data = new_mean.astype(running_mean.dtype)
+    running_var.data = new_var.astype(running_var.dtype)
 
 
 # ----------------------------------------------------------------------
