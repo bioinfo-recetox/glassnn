@@ -107,3 +107,66 @@ def test_loss_modules_call_the_functions(rng):
         ce(logits, labels).data,
         F.cross_entropy(logits, labels, label_smoothing=0.1).data,
     )
+
+
+# --------------------------------------------------------------------------
+# Linear with the NTK parametrization
+# --------------------------------------------------------------------------
+
+
+def test_ntk_linear_initializes_weight_and_bias_standard_normal():
+    backend.manual_seed(0)
+    layer = nn.Linear(300, 400, parametrization="ntk")
+    assert layer.weight.data.mean() == pytest.approx(0.0, abs=0.01)
+    assert layer.weight.data.std() == pytest.approx(1.0, rel=0.01)
+    assert layer.bias.data.std() == pytest.approx(1.0, rel=0.1)
+
+
+def test_ntk_linear_scales_the_preactivation(rng):
+    layer = nn.Linear(4, 3, parametrization="ntk")
+    x = Tensor(rng.normal(size=(5, 4)))
+    expected = x.data @ layer.weight.data.T / 2.0 + layer.bias.data
+    np.testing.assert_allclose(layer(x).data, expected)
+
+
+def test_ntk_linear_gradients_carry_the_scale(rng):
+    # With Y = X W^T / sqrt(n) + b and L = sum(Y * G): dW = G^T X / sqrt(n).
+    layer = nn.Linear(4, 2, parametrization="ntk")
+    x = Tensor(rng.normal(size=(3, 4)), requires_grad=True)
+    g = rng.normal(size=(3, 2))
+    (layer(x) * g).sum().backward()
+    np.testing.assert_allclose(layer.weight.grad.data, g.T @ x.data / 2.0)
+    np.testing.assert_allclose(layer.bias.grad.data, g.sum(axis=0))
+    np.testing.assert_allclose(x.grad.data, g @ layer.weight.data / 2.0)
+
+
+def test_ntk_preactivation_scale_does_not_depend_on_width(rng):
+    # Var(z_i) = |x|^2 / n + 1 = 2 for inputs with unit second moment.
+    backend.manual_seed(1)
+    x = Tensor(rng.normal(size=(2000, 50)))
+    for width in (50, 5000):
+        hidden = nn.Linear(50, width, parametrization="ntk")
+        h = F.relu(hidden(x))
+        out = nn.Linear(width, 1, parametrization="ntk")(h)
+        assert hidden(x).data.std() == pytest.approx(np.sqrt(2.0), rel=0.15)
+        assert 0.5 < out.data.std() < 3.0
+
+
+def test_linear_rejects_an_unknown_parametrization():
+    with pytest.raises(ValueError, match=r"'standard' or 'ntk'.*'mup'"):
+        nn.Linear(2, 2, parametrization="mup")
+
+
+def test_ntk_linear_repr():
+    layer = nn.Linear(2, 3, parametrization="ntk")
+    assert repr(layer) == (
+        "Linear(in_features=2, out_features=3, bias=True, parametrization='ntk')"
+    )
+    assert repr(nn.Linear(2, 3)) == "Linear(in_features=2, out_features=3, bias=True)"
+
+
+def test_ntk_linear_without_bias(rng):
+    layer = nn.Linear(4, 3, bias=False, parametrization="ntk")
+    assert layer.bias is None
+    x = Tensor(rng.normal(size=(2, 4)))
+    np.testing.assert_allclose(layer(x).data, x.data @ layer.weight.data.T / 2.0)

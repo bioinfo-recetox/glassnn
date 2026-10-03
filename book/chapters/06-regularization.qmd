@@ -1,0 +1,474 @@
+# Regularization: weight decay, dropout, early stopping, normalization {#sec-regularization}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Relate weight decay, early stopping and dropout to explicit penalties on
+  the parameters, and know when the equivalences hold.
+- Derive batch normalization and layer normalization, including the
+  gradient through the batch statistics, and the different behaviour of
+  batch normalization in training and evaluation.
+- Use `Dropout`, `BatchNorm1d` and `LayerNorm` in a model, with
+  `model.train()` and `model.eval()`.
+- See on small examples that regularization must be tuned, and that
+  normalization changes what can be trained at all.
+
+## Theory
+
+### Penalties and weight decay
+
+A network with more parameters than training samples can fit the training
+data in many ways. *Regularization* is anything that prefers some of these
+fits over others. The oldest form adds a penalty to the empirical risk; with
+the squared Euclidean norm,
+
+$$
+\tilde{\mathcal L}(\theta) = \mathcal L(\theta) + \frac{\lambda}{2}
+\lVert \theta \rVert^2 ,
+\qquad
+\theta \leftarrow \theta - \eta \nabla \mathcal L(\theta) - \eta \lambda \theta
+= (1 - \eta\lambda)\, \theta - \eta \nabla \mathcal L(\theta).
+$$ {#eq-weight-decay}
+
+For plain gradient descent the penalty is the same as shrinking every
+parameter by the factor $1 - \eta\lambda$ before each step: *weight decay*.
+It is also the maximum a posteriori estimate under a Gaussian prior
+$\theta \sim \mathcal N(0, \lambda^{-1} I)$ when $\mathcal L$ is a negative
+log-likelihood [@goodfellow2016deep, section 7.1]. For adaptive methods such
+as Adam, the penalty gradient $\lambda\theta$ is divided by the running
+scale of the gradient, and the two are no longer the same; AdamW applies the
+shrinkage of @eq-weight-decay directly (@sec-optimization;
+@loshchilov2019decoupled). Biases and the parameters of normalization layers
+are often excluded from the decay; GlassNN optimizers have a single
+parameter group, so to exclude them you use two optimizers.
+
+### Early stopping
+
+Gradient descent from a small initialization fits the directions with
+large curvature first. For a quadratic risk
+$\mathcal L(\theta) = \frac12 (\theta - \theta^\star)^\top H (\theta - \theta^\star)$
+started at $\theta_0 = 0$, the iterates are
+
+$$
+\theta_t = \bigl(I - (I - \eta H)^t\bigr)\, \theta^\star ,
+$$ {#eq-early-stopping}
+
+so in the eigenbasis of $H$ the component along an eigenvalue $h_i$ is
+scaled by $1 - (1 - \eta h_i)^t$. The L2-penalized minimizer scales the same
+component by $h_i / (h_i + \lambda)$. Both are close to 1 for
+$h_i \gg \lambda$ and close to 0 for $h_i \ll \lambda$ when
+$\lambda \approx 1/(\eta t)$: stopping after $t$ steps acts like weight
+decay with strength $1/(\eta t)$ [@goodfellow2016deep, section 7.8]. In
+practice the number of steps is chosen on a validation set: train, keep the
+parameters with the best validation loss, stop when it has not improved for
+a while.
+
+### Dropout
+
+Dropout multiplies every unit of a layer by an independent random mask
+$m_i \sim \text{Bernoulli}(1 - p)$ during training
+[@srivastava2014dropout]. GlassNN, like PyTorch, uses *inverted* dropout,
+which rescales during training so that nothing changes at evaluation time:
+
+$$
+z = \frac{m \odot a}{1 - p},
+\qquad \E[z] = a,
+\qquad \bar a = \frac{m \odot \bar z}{1 - p} .
+$$ {#eq-dropout}
+
+Each training step therefore trains a random sub-network, and the network
+at evaluation time approximates the average of these $2^n$ sub-networks.
+For linear regression the effect is an explicit, data-dependent penalty:
+with $\hat y = w^\top (m \odot x)/(1 - p)$,
+
+$$
+\E_m\bigl[(y - \hat y)^2\bigr] = (y - w^\top x)^2
++ \frac{p}{1 - p} \sum_i w_i^2 x_i^2 ,
+$$ {#eq-dropout-penalty}
+
+an L2 penalty that weights each coefficient by the scale of its input
+(Exercise 6.1).
+
+### Batch normalization
+
+Normalizing the inputs of a linear model to zero mean and unit variance
+makes its risk better conditioned. Batch normalization does the same for
+the inputs of every layer, using the statistics of the current mini-batch
+[@ioffe2015batch]. For one channel with values $x_1, \dots, x_m$ in the
+batch (for an input of shape $(N, C, L)$, $m = NL$),
+
+$$
+\mu = \frac1m \sum_i x_i, \quad
+\sigma^2 = \frac1m \sum_i (x_i - \mu)^2, \quad
+\hat x_i = \frac{x_i - \mu}{\sqrt{\sigma^2 + \varepsilon}}, \quad
+y_i = \gamma \hat x_i + \beta .
+$$ {#eq-batch-norm}
+
+The learned $\gamma$ and $\beta$ restore the freedom of scale and shift, so
+the layer can represent the identity. In training, $\mu$ and $\sigma$ depend
+on every sample of the batch, and the gradient flows through them. With
+$r = (\sigma^2 + \varepsilon)^{-1/2}$ and means over the batch,
+
+$$
+\bar x_i = r \Bigl( \bar{\hat x}_i - \operatorname{mean}_j \bar{\hat x}_j
+- \hat x_i \operatorname{mean}_j \bigl(\bar{\hat x}_j \hat x_j\bigr) \Bigr),
+$$ {#eq-batch-norm-backward}
+
+the gradient of $\hat x$ with its components along the constant vector and
+along $\hat x$ removed: shifting all $x_i$, or scaling them about their
+mean, does not change $\hat x$ (Exercise 6.2).
+
+At evaluation time a prediction must not depend on the other samples, so
+batch normalization keeps *running* estimates, updated at every training
+step with the momentum $\rho$:
+
+$$
+\hat\mu \leftarrow (1 - \rho)\, \hat\mu + \rho\, \mu, \qquad
+\hat\sigma^2 \leftarrow (1 - \rho)\, \hat\sigma^2
++ \rho\, \frac{m}{m - 1}\, \sigma^2 .
+$$ {#eq-running-stats}
+
+In evaluation mode these replace $\mu$ and $\sigma^2$ in @eq-batch-norm, and
+the layer becomes a fixed affine map. Forgetting `model.eval()` before
+evaluating is a classic bug: the predictions then depend on the batch.
+
+Why batch normalization helps optimization is still debated; the original
+motivation, "internal covariate shift", is not the accepted explanation.
+What is clear is the practical effect: deep networks become much less
+sensitive to the initialization and tolerate larger learning rates (Try it).
+
+### Layer normalization
+
+Layer normalization standardizes each *sample* over its features instead of
+each feature over the batch [@ba2016layer]: for a sample
+$x \in \R^{d}$,
+
+$$
+y = \frac{x - \mu(x)}{\sqrt{\sigma^2(x) + \varepsilon}} \odot \gamma + \beta,
+\qquad \mu(x) = \frac1d \sum_k x_k ,
+$$ {#eq-layer-norm}
+
+with the same gradient as @eq-batch-norm-backward, the means now taken over
+the features. The statistics do not depend on the batch, so training and
+evaluation are the same and a batch of one sample is fine. This is the
+normalization of transformers (Chapter 10).
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+Inverted dropout, @eq-dropout, in
+`{python} api_link("glassnn.functional.dropout")`: the mask is drawn from the
+global generator (or an explicit `generator=`) and reused in the backward
+pass (`{python} src_link("glassnn.functional.dropout")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.functional.dropout")
+```
+
+Batch and layer normalization share one operation with its own backward
+pass, @eq-batch-norm-backward
+(`{python} src_link("glassnn.functional._standardize")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.functional._standardize")
+```
+
+`{python} api_link("glassnn.functional.batch_norm")` calls it over the axes
+`(0,)` or `(0, 2)` in training (and updates the running statistics,
+@eq-running-stats), and uses the running statistics in evaluation;
+`{python} api_link("glassnn.functional.layer_norm")` calls it over the last
+dimensions. The module `BatchNorm1d` stores the running statistics as
+*buffers*: tensors that `state_dict()` saves but that are not parameters,
+so the optimizer never changes them
+(`{python} src_link("glassnn.nn.BatchNorm1d.__init__")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.BatchNorm1d.__init__")
+```
+
+`{python} see_also("glassnn.nn.Dropout", "glassnn.nn.BatchNorm1d", "glassnn.nn.LayerNorm", "glassnn.nn.Module.register_buffer", "glassnn.optim.AdamW")`
+:::
+
+::: {.callout-warning title="Differences from PyTorch"}
+- `BatchNorm1d` has no `num_batches_tracked` buffer and does not accept
+  `momentum=None` (cumulative averaging).
+- `F.dropout` accepts a `generator=`; neither `F.dropout` nor `Dropout` has
+  an `inplace` argument.
+- `register_buffer` has no `persistent` argument: every buffer is saved.
+:::
+
+## Try it
+
+### Batch normalization in training and evaluation mode
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, manual_seed, nn, no_grad, optim
+
+rng = np.random.default_rng(0)
+layer = nn.BatchNorm1d(2)
+for _ in range(100):  # batches from N(3, 2^2) and N(-1, 0.5^2)
+    batch = rng.normal([3.0, -1.0], [2.0, 0.5], size=(32, 2))
+    layer(Tensor(batch))
+print("running mean:", layer.running_mean.data.round(2))
+print("running var: ", layer.running_var.data.round(2))
+```
+
+The running statistics approach the population values $(3, -1)$ and
+$(4, 0.25)$. In training mode, the output for a sample depends on the rest
+of the batch; in evaluation mode it does not:
+
+```{python}
+x = np.array([[3.0, -1.0]])
+others = rng.normal(size=(7, 2))
+batch_1 = Tensor(np.vstack([x, others]))
+batch_2 = Tensor(np.vstack([x, 5 + others]))  # same x, different companions
+with no_grad():
+    print("train, batch 1:", layer(batch_1).data[0].round(3))
+    print("train, batch 2:", layer(batch_2).data[0].round(3))
+    layer.eval()
+    print("eval:          ", layer(Tensor(x)).data[0].round(3))
+```
+
+### Deep networks with and without batch normalization
+
+A 10-layer ReLU network of width 64 on the two moons, trained with SGD and
+momentum for 300 steps, with PyTorch's default initialization and with a
+too-small initialization (@sec-initialization):
+
+```{python}
+from sklearn.datasets import make_moons
+
+from glassnn.nn import init
+
+X_moons, y_moons = make_moons(n_samples=512, noise=0.2, random_state=0)
+
+
+def deep_mlp(batch_norm, weight_std=None, depth=10, width=64):
+    manual_seed(0)
+    layers, n_in = [], 2
+    for _ in range(depth):
+        linear = nn.Linear(n_in, width)
+        if weight_std is not None:
+            init.normal_(linear.weight, std=weight_std)
+        layers.append(linear)
+        if batch_norm:
+            layers.append(nn.BatchNorm1d(width))
+        layers.append(nn.ReLU())
+        n_in = width
+    layers.append(nn.Linear(width, 2))
+    return nn.Sequential(*layers)
+
+
+def train_moons(model, steps=300):
+    optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+    batches = np.random.default_rng(1)
+    losses = []
+    for _ in range(steps):
+        idx = batches.choice(len(X_moons), size=64, replace=False)
+        optimizer.zero_grad()
+        loss = F.cross_entropy(model(Tensor(X_moons[idx])), Tensor(y_moons[idx]))
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+    return np.array(losses)
+
+
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.5), sharey=True)
+for ax, (title, std) in zip(axes, [("default initialization", None), ("N(0, 0.01²)", 0.01)]):
+    for batch_norm in (False, True):
+        losses = train_moons(deep_mlp(batch_norm, std))
+        smooth = np.convolve(losses, np.ones(10) / 10, mode="valid")
+        ax.plot(smooth, label="with BatchNorm1d" if batch_norm else "without")
+    ax.set_title(title)
+    ax.set_xlabel("step")
+axes[0].set_ylabel("training loss (moving average)")
+axes[0].legend()
+plt.show()
+```
+
+Without normalization, the 10-layer network does not get past the loss of
+random guessing ($\ln 2 \approx 0.69$) in 300 steps with either
+initialization (as in Exercise 4.3): the signal shrinks through the layers and the gradients of
+the first layers are tiny. With batch normalization after every linear
+layer, each layer receives standardized inputs whatever the scale of the
+weights, and the same network trains quickly in both cases.
+
+### Weight decay and early stopping
+
+Twenty noisy samples of $\sin(\pi x)$ and an MLP with two hidden layers of
+width 256, trained with AdamW on the full batch; the validation set has
+500 samples. The noise variance is $0.25$, the smallest possible validation
+error.
+
+```{python}
+data_rng = np.random.default_rng(0)
+
+
+def noisy_sine(n):
+    x = data_rng.uniform(-1, 1, size=(n, 1))
+    return x, np.sin(np.pi * x) + 0.5 * data_rng.normal(size=(n, 1))
+
+
+X_train, y_train = noisy_sine(20)
+X_val, y_val = noisy_sine(500)
+
+
+def fit(weight_decay, seed=0, steps=1500):
+    # Returns the training and validation MSE every 25 steps.
+    manual_seed(seed)
+    model = nn.Sequential(
+        nn.Linear(1, 256), nn.ReLU(), nn.Linear(256, 256), nn.ReLU(), nn.Linear(256, 1)
+    )
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=weight_decay)
+    history = []
+    for step in range(steps):
+        optimizer.zero_grad()
+        F.mse_loss(model(Tensor(X_train)), Tensor(y_train)).backward()
+        optimizer.step()
+        if step % 25 == 0:
+            with no_grad():
+                history.append([
+                    F.mse_loss(model(Tensor(X_train)), Tensor(y_train)).item(),
+                    F.mse_loss(model(Tensor(X_val)), Tensor(y_val)).item(),
+                ])
+    return np.array(history)
+
+
+history = fit(weight_decay=0.0)
+decays = [0.0, 1.0, 3.0, 10.0, 30.0]
+final_val = [np.mean([fit(wd, seed)[-1, 1] for seed in range(3)]) for wd in decays]
+
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
+steps = 25 * np.arange(len(history))
+axes[0].plot(steps, history[:, 0], label="train")
+axes[0].plot(steps, history[:, 1], label="validation")
+best = int(np.argmin(history[:, 1]))
+axes[0].axvline(steps[best], color="gray", linestyle=":", label="best validation")
+axes[0].set_xlabel("step")
+axes[0].set_ylabel("MSE")
+axes[0].legend()
+axes[1].semilogx([d if d else 0.3 for d in decays], final_val, "o-")
+axes[1].set_xlabel(r"weight decay $\lambda$ (0 plotted at 0.3)")
+axes[1].set_ylabel("final validation MSE (3 seeds)")
+fig.tight_layout()
+plt.show()
+print(f"no regularization: final {history[-1, 1]:.3f}, best {history[best, 1]:.3f} at step {steps[best]}")
+```
+
+Without regularization the training error keeps falling while the
+validation error rises after a few dozen steps: stopping early gives the
+best validation error here. A moderate weight decay improves the final
+validation error a little; a large one underfits. The best strength depends
+on the problem and has to be chosen on validation data.
+
+## Exercises
+
+::: {.callout-tip title="Exercise 6.1: dropout as a penalty"}
+Prove @eq-dropout-penalty. *Hint:* write $\hat y = w^\top x + \delta$ with
+$\delta = \sum_i w_i x_i (m_i/(1-p) - 1)$, and compute $\E[\delta]$ and
+$\E[\delta^2]$.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$\E[m_i/(1-p)] = 1$, so $\E[\delta] = 0$ and
+$\E[(y - \hat y)^2] = (y - w^\top x)^2 + \E[\delta^2]$. The masks are
+independent, so
+$\E[\delta^2] = \sum_i w_i^2 x_i^2 \Var(m_i/(1-p)) = \sum_i w_i^2 x_i^2 \frac{p(1-p)}{(1-p)^2}
+= \frac{p}{1-p}\sum_i w_i^2 x_i^2$. Averaged over the data, the penalty is
+$\frac{p}{1-p}\sum_i w_i^2\, \E[x_i^2]$: ridge regression on standardized
+inputs.
+:::
+
+::: {.callout-tip title="Exercise 6.2: what batch normalization ignores"}
+(a) Show that the output of batch normalization (in training mode) does not
+change if the weights $W$ and the bias $b$ of the preceding linear layer
+are replaced by $cW$ and $cb + d$ for $c > 0$ and any vector $d$ (up to
+$\varepsilon$). (b) Use @eq-batch-norm-backward to show that
+$\sum_i \bar x_i = 0$ and $\sum_i \bar x_i \hat x_i = 0$. (c) What does (a)
+imply for the bias of a linear layer followed by batch normalization, and
+for weight decay on its weights?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+(a) Each pre-activation channel becomes $c x_i + d$: its mean becomes
+$c\mu + d$ and its standard deviation $c\sigma$, so $\hat x_i$ is unchanged
+(exactly so for $\varepsilon = 0$). (b) Summing @eq-batch-norm-backward
+over $i$ gives $r(m\,\mathrm{mean}(\bar{\hat x}) - m\,\mathrm{mean}(\bar{\hat x})
+- \mathrm{mean}(\bar{\hat x}\hat x)\sum_i \hat x_i) = 0$ since
+$\sum_i \hat x_i = 0$; multiplying by $\hat x_i$ first and using
+$\sum_i \hat x_i^2 = m$ (for $\varepsilon = 0$) gives 0 as well. (c) The
+bias is useless (it is removed with the mean; $\beta$ takes its role), so
+layers followed by batch normalization are usually built with
+`bias=False`. The output does not depend on the scale of $W$, so weight
+decay does not regularize the function; it only shrinks $\lVert W \rVert$,
+which increases the effective learning rate of the direction of $W$.
+:::
+
+::: {.callout-tip title="Exercise 6.3: early stopping on a quadratic"}
+Derive @eq-early-stopping and compare the factor $1 - (1-\eta h)^t$ with
+$h/(h+\lambda)$ for $\lambda = 1/(\eta t)$ numerically, for
+$\eta = 0.1$, $t = 50$ and $h \in [10^{-3}, 10]$.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The gradient is $H(\theta - \theta^\star)$, so
+$\theta_{t+1} - \theta^\star = (I - \eta H)(\theta_t - \theta^\star)$ and
+$\theta_t - \theta^\star = (I - \eta H)^t (\theta_0 - \theta^\star)
+= -(I - \eta H)^t \theta^\star$.
+
+```{python}
+h = np.logspace(-3, 1, 200)
+eta, t = 0.1, 50
+plt.figure(figsize=(5, 3))
+plt.semilogx(h, 1 - (1 - eta * h) ** t, label="early stopping")
+plt.semilogx(h, h / (h + 1 / (eta * t)), "--", label=r"L2, $\lambda = 1/(\eta t)$")
+plt.xlabel("curvature $h$")
+plt.legend()
+plt.show()
+```
+
+Both filters are close to 0 for small curvatures and close to 1 for large
+ones, with the transition at the same place; the shapes differ a little.
+:::
+
+::: {.callout-tip title="Exercise 6.4: dropout in practice"}
+Add `nn.Dropout(p)` after each hidden ReLU of the sine regression above, for
+$p \in \{0.2, 0.5\}$. Does it improve the final validation error? What
+happens if you forget `model.eval()` when computing it?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+Averaged over three seeds, $p = 0.2$ lowers the final validation MSE a
+little (from about 0.326 to 0.312) and $p = 0.5$ raises it (to about 0.338).
+With dropout the best validation error comes later in training, and it is
+not clearly better than early stopping without dropout (about 0.28 to
+0.29). As with weight decay, the strength must be tuned, and the gains on
+this small problem are modest. Without `model.eval()`, the validation
+predictions come from a random sub-network, and the validation error is
+higher (0.346 instead of 0.327 for $p = 0.5$ and seed 0).
+:::
+
+## Notes and references
+
+- This chapter supports lecture 10 of *Advanced Machine Learning*
+  (regularization).
+- Penalties, early stopping and dropout in deep learning:
+  @goodfellow2016deep, chapter 7. Dropout: @srivastava2014dropout. Decoupled
+  weight decay: @loshchilov2019decoupled.
+- Batch normalization: @ioffe2015batch. Layer normalization:
+  @ba2016layer.
+- Example notebook `05_memorizing_noise` shows weight decay and early
+  stopping in the setting of @sec-memorization.

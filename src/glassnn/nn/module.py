@@ -18,6 +18,9 @@ class Module:
     Assigning a :class:`Parameter` or a ``Module`` to an attribute registers
     it (see :meth:`__setattr__`), so that :meth:`parameters` can collect all
     learnable tensors of a model, at any depth, for the optimizer.
+    Tensors that are part of the state of a model but are not learned, such
+    as the running statistics of batch normalization, are registered with
+    :meth:`register_buffer`.
 
     Attributes:
         training: ``True`` in training mode, ``False`` after :meth:`eval`.
@@ -40,6 +43,7 @@ class Module:
     """
 
     _parameters: dict[str, Parameter]
+    _buffers: dict[str, Tensor | None]
     _modules: dict[str, "Module"]
     training: bool
 
@@ -47,6 +51,7 @@ class Module:
         """Create the registries; subclasses must call this first."""
         # object.__setattr__ bypasses our own __setattr__ below.
         object.__setattr__(self, "_parameters", {})
+        object.__setattr__(self, "_buffers", {})
         object.__setattr__(self, "_modules", {})
         object.__setattr__(self, "training", True)
 
@@ -56,16 +61,28 @@ class Module:
         ``self.weight = Parameter(...)`` stores the parameter under the name
         ``"weight"``; ``self.layer = Linear(...)`` stores the sub-module.
         Assigning anything else (e.g. ``None``) under a registered name
-        removes the registration.
+        removes the registration. Assigning a ``Tensor`` (or ``None``) to the
+        name of a buffer replaces the buffer.
 
         Raises:
             AttributeError: If ``super().__init__()`` was not called first.
+            TypeError: If a buffer is replaced by something else than a
+                ``Tensor`` or ``None``.
         """
         if "_parameters" not in self.__dict__:
             raise AttributeError(
                 f"Call super().__init__() at the start of "
                 f"{type(self).__name__}.__init__, before assigning attributes."
             )
+        if name in self._buffers:
+            if value is not None and not isinstance(value, Tensor):
+                raise TypeError(
+                    f"Cannot assign a {type(value).__name__} to the buffer "
+                    f"{name!r}; assign a Tensor or None."
+                )
+            self._buffers[name] = value
+            object.__setattr__(self, name, value)
+            return
         self._parameters.pop(name, None)
         self._modules.pop(name, None)
         if isinstance(value, Parameter):
@@ -73,6 +90,44 @@ class Module:
         elif isinstance(value, Module):
             self._modules[name] = value
         object.__setattr__(self, name, value)
+
+    def register_buffer(self, name: str, tensor: Tensor | None) -> None:
+        """Register a tensor that is part of the state but is not learned.
+
+        A buffer is saved by :meth:`state_dict` and restored by
+        :meth:`load_state_dict`, but :meth:`parameters` does not yield it, so
+        an optimizer never changes it. ``None`` registers the name without a
+        value (it is then skipped by :meth:`state_dict`).
+
+        Args:
+            name: The attribute name, e.g. ``"running_mean"``.
+            tensor: The value, or ``None``.
+
+        Raises:
+            KeyError: If ``name`` is already an attribute.
+            TypeError: If ``tensor`` is neither a ``Tensor`` nor ``None``.
+
+        Note:
+            Differences from PyTorch: there is no ``persistent`` argument;
+            every buffer is saved.
+
+        Example:
+            >>> from glassnn import Tensor, nn
+            >>> module = nn.Module()
+            >>> module.register_buffer("count", Tensor(0.0))
+            >>> [name for name, _ in module.named_buffers()]
+            ['count']
+        """
+        if hasattr(self, name) and name not in self._buffers:
+            raise KeyError(
+                f"Cannot register the buffer {name!r}: the attribute exists."
+            )
+        if tensor is not None and not isinstance(tensor, Tensor):
+            raise TypeError(
+                f"A buffer must be a Tensor or None, got {type(tensor).__name__}."
+            )
+        self._buffers[name] = tensor
+        object.__setattr__(self, name, tensor)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Compute the output; every subclass must define it.
@@ -115,6 +170,23 @@ class Module:
         """Yield all parameters (see :meth:`named_parameters`)."""
         for _, parameter in self.named_parameters():
             yield parameter
+
+    def named_buffers(self, prefix: str = "") -> Iterator[tuple[str, Tensor]]:
+        """Yield ``(name, buffer)`` for this module and all sub-modules.
+
+        Names and order are as in :meth:`named_parameters`; buffers that are
+        ``None`` are skipped.
+        """
+        for name, buffer in self._buffers.items():
+            if buffer is not None:
+                yield prefix + name, buffer
+        for name, module in self._modules.items():
+            yield from module.named_buffers(prefix + name + ".")
+
+    def buffers(self) -> Iterator[Tensor]:
+        """Yield all buffers (see :meth:`named_buffers`)."""
+        for _, buffer in self.named_buffers():
+            yield buffer
 
     def modules(self) -> Iterator["Module"]:
         """Yield this module and all sub-modules, depth first."""
@@ -167,19 +239,26 @@ class Module:
     # ------------------------------------------------------------------
 
     def state_dict(self) -> dict[str, Tensor]:
-        """Return a copy of all parameters, keyed by their dotted names.
+        """Return a copy of all parameters and buffers, keyed by dotted names.
+
+        Parameters come first, then buffers.
 
         Note:
             Differences from PyTorch: the values are copies, not tensors
-            that share memory with the parameters.
+            that share memory with the parameters; PyTorch lists the
+            parameters and buffers of each module together.
         """
         return {
-            name: Tensor(backend.xp.array(parameter.data), dtype=parameter.dtype)
-            for name, parameter in self.named_parameters()
+            name: Tensor(backend.xp.array(tensor.data), dtype=tensor.dtype)
+            for name, tensor in self._named_state()
         }
 
+    def _named_state(self) -> Iterator[tuple[str, Tensor]]:
+        yield from self.named_parameters()
+        yield from self.named_buffers()
+
     def load_state_dict(self, state_dict: dict[str, Any], strict: bool = True) -> None:
-        """Copy values from ``state_dict`` into the parameters.
+        """Copy values from ``state_dict`` into the parameters and buffers.
 
         Args:
             state_dict: Names mapped to tensors or arrays, as returned by
@@ -190,25 +269,25 @@ class Module:
             KeyError: If ``strict`` and names are missing or unexpected (the
                 message lists them).
             ValueError: If a value has the wrong shape (the message names the
-                parameter and both shapes).
+                parameter or buffer and both shapes).
         """
-        own = dict(self.named_parameters())
+        own = dict(self._named_state())
         missing = [name for name in own if name not in state_dict]
         unexpected = [name for name in state_dict if name not in own]
         if strict and (missing or unexpected):
             raise KeyError(f"missing keys: {missing}; unexpected keys: {unexpected}")
-        for name, parameter in own.items():
+        for name, tensor in own.items():
             if name not in state_dict:
                 continue
             value = state_dict[name]
             data = value.data if isinstance(value, Tensor) else value
-            new = backend.xp.array(data, dtype=parameter.dtype)
-            if tuple(new.shape) != parameter.shape:
+            new = backend.xp.array(data, dtype=tensor.dtype)
+            if tuple(new.shape) != tensor.shape:
                 raise ValueError(
-                    f"Shape mismatch for {name!r}: the parameter has shape "
-                    f"{parameter.shape}, the state_dict has {tuple(new.shape)}."
+                    f"Shape mismatch for {name!r}: the model has shape "
+                    f"{tensor.shape}, the state_dict has {tuple(new.shape)}."
                 )
-            parameter.data = new
+            tensor.data = new
 
     # ------------------------------------------------------------------
     # Printing

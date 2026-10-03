@@ -763,6 +763,8 @@ docs = [
 examples = [
     { name = "ipykernel" },
     { name = "matplotlib" },
+    { name = "nbclient" },
+    { name = "nbformat" },
     { name = "scikit-learn" },
 ]
 gpu = [
@@ -778,7 +780,9 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'book'", specifier = ">=3.10" },
     { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.10" },
     { name = "nbclient", marker = "extra == 'book'", specifier = ">=0.10" },
+    { name = "nbclient", marker = "extra == 'examples'", specifier = ">=0.10" },
     { name = "nbformat", marker = "extra == 'book'", specifier = ">=5" },
+    { name = "nbformat", marker = "extra == 'examples'", specifier = ">=5" },
     { name = "numpy", specifier = ">=2.5" },
     { name = "numpy", marker = "extra == 'gpu'", specifier = "<2.6" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4" },

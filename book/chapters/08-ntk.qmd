@@ -1,0 +1,349 @@
+# The neural tangent kernel and lazy training {#sec-ntk}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Define the empirical neural tangent kernel (NTK) of a network and derive
+  the training dynamics of the outputs under gradient flow.
+- Explain why, in the NTK parametrization, the kernel of a very wide network
+  is deterministic at initialization and hardly changes during training.
+- Connect a trained wide network to kernel regression with the NTK, and
+  name what is lost in this "lazy" regime.
+- Compute and compare kernels with `glassnn.analysis.empirical_ntk` and
+  `Linear(parametrization="ntk")`.
+
+## Theory
+
+### Linearization and the tangent kernel
+
+Write $f(x; \theta) \in \R$ for the output of a network with parameters
+$\theta \in \R^P$. Around the initial parameters $\theta_0$,
+
+$$
+f(x; \theta) \approx f_{\text{lin}}(x; \theta) = f(x; \theta_0)
++ \nabla_\theta f(x; \theta_0)^\top (\theta - \theta_0) ,
+$$ {#eq-linearization}
+
+a model that is *linear in the parameters* with the feature map
+$x \mapsto \nabla_\theta f(x; \theta_0)$. The kernel of this feature map is
+the (empirical) neural tangent kernel [@jacot2018neural]
+
+$$
+\Theta(x, x') = \nabla_\theta f(x; \theta)^\top \nabla_\theta f(x'; \theta),
+\qquad K = J(X) J(X)^\top ,
+$$ {#eq-ntk}
+
+where row $i$ of the Jacobian $J(X) \in \R^{n \times P}$ is
+$\nabla_\theta f(x_i)^\top$. $K$ is symmetric and positive semi-definite.
+
+### Training dynamics of the outputs
+
+Take the squared loss $\mathcal L(\theta) = \frac{1}{2n}\lVert f(X) - y\rVert^2$
+and gradient flow $\dot\theta = -\nabla_\theta \mathcal L
+= -\frac1n J(X)^\top (f(X) - y)$. By the chain rule the outputs move as
+
+$$
+\frac{d}{dt} f(X) = J(X)\, \dot\theta = -\frac1n K_t\, (f(X) - y) ,
+$$ {#eq-ntk-dynamics}
+
+and the output at any other point as
+$\frac{d}{dt} f(x) = -\frac1n \Theta_t(x, X)(f(X) - y)$. In general the
+kernel $K_t$ changes with $\theta_t$. If it stays equal to $K_0$, the
+equation is linear and solved by
+
+$$
+f_t(X) = y + e^{-K_0 t/n} \bigl(f_0(X) - y\bigr),
+\qquad
+f_t(x) = f_0(x) - \Theta_0(x, X)\, K_0^{-1} \bigl(I - e^{-K_0 t / n}\bigr)
+\bigl(f_0(X) - y\bigr) .
+$$ {#eq-ntk-solution}
+
+As $t \to \infty$, $f_\infty(x) - f_0(x)$ is the kernel regression
+(interpolation) of the residuals $y - f_0(X)$ with the kernel $\Theta_0$:
+the trained network is a kernel machine, with all the tools of the
+kernel lectures. The eigenvectors of $K_0$ with large eigenvalues are
+learned first (compare early stopping, @eq-early-stopping). In discrete
+time with learning rate $\eta$, the step $f \leftarrow f - \frac{\eta}{n}
+K_0 (f - y)$ is stable if $\eta < 2n / \lambda_{\max}(K_0)$.
+
+### When does the kernel stay fixed? Width and parametrization
+
+Consider one hidden layer of width $m$ in the **NTK parametrization**
+(`Linear(parametrization="ntk")`),
+
+$$
+f(x) = \frac{1}{\sqrt m} \sum_{j=1}^m a_j \operatorname{relu}(z_j) + c,
+\qquad z_j = \frac{w_j^\top x}{\sqrt d} + b_j,
+\qquad a_j, w_j, b_j, c \sim \mathcal N(0, 1).
+$$ {#eq-ntk-mlp}
+
+The gradient with respect to the output weights is
+$\partial f / \partial a_j = \operatorname{relu}(z_j)/\sqrt m$, and similarly
+for the other parameters, so the kernel is an *average* over the units:
+
+$$
+\Theta(x, x') = 1 + \frac1m \sum_{j=1}^m \operatorname{relu}(z_j)\operatorname{relu}(z'_j)
++ \frac1m \sum_{j=1}^m a_j^2\, \mathbb 1[z_j > 0]\, \mathbb 1[z'_j > 0]
+\Bigl(\frac{x^\top x'}{d} + 1\Bigr)
+$$ {#eq-ntk-one-layer}
+
+(Exercise 8.1). By the law of large numbers it converges, as $m \to \infty$,
+to a deterministic kernel, with fluctuations of order $1/\sqrt m$. During
+training each single weight moves by $O(1/\sqrt m)$, so the change of the
+kernel is also $O(1/\sqrt m)$, while the output changes by $O(1)$. In the
+limit the network trains exactly like its linearization @eq-linearization
+[@jacot2018neural; @lee2019wide]. @chizat2019lazy call this *lazy
+training* and show that it is not specific to width: any model whose output
+is scaled up (and the learning rate down accordingly) behaves the same.
+
+In the **standard parametrization** (PyTorch's default, weights of variance
+$\propto 1/n_\text{in}$ and no $1/\sqrt{n_\text{in}}$ factor in the forward
+pass), the forward pass at initialization has a similar scale, but the sum in
+@eq-ntk-one-layer has no $1/m$: the kernel grows with the width, and a fixed
+learning rate becomes unstable for wide networks (Exercise 8.2).
+
+### What the kernel regime does not explain
+
+A network in the lazy regime is a kernel method with a kernel fixed at
+initialization: its hidden layers do not learn *features* from the data.
+Practical networks of finite width, trained with large learning rates,
+leave this regime, and much of their success (for example on images and
+sequences, Part III) comes from feature learning. The NTK is the exact
+description of one limit, and a useful baseline, not a complete theory of
+deep learning.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+`{python} api_link("glassnn.analysis.empirical_ntk")` builds each Jacobian
+row from one backward pass, by calling the model on one example at a time
+(`{python} src_link("glassnn.analysis._jacobian")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.analysis._jacobian")
+```
+
+and returns $J(X_1) J(X_2)^\top$; the existing `.grad` of the parameters is
+saved and restored, so the function can be called in the middle of
+training. The cost is $n_1 + n_2$ backward passes and $O((n_1 + n_2) P)$
+memory.
+
+The NTK parametrization is an option of `Linear`, whose forward pass
+divides the weight by $\sqrt{n_\text{in}}$
+(`{python} src_link("glassnn.nn.Linear.forward")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.Linear.forward")
+```
+
+`{python} see_also("glassnn.nn.Linear", "glassnn.analysis.count_parameters", "glassnn.optim.SGD")`
+:::
+
+::: {.callout-warning title="Differences from PyTorch"}
+PyTorch has neither an `empirical_ntk` function nor an NTK option in
+`torch.nn.Linear`. The same kernel is computed there with
+`torch.func.jacrev` and a matrix product, and the parametrization with a
+custom module.
+:::
+
+## Try it
+
+The setting of notebook 04: twenty points of $y = \sin(3x)$ in one
+dimension, plus a constant second input, and one hidden ReLU layer in the
+NTK parametrization.
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, backend, manual_seed, nn, no_grad, optim
+from glassnn.analysis import empirical_ntk
+
+backend.set_default_dtype("float64")
+
+rng = np.random.default_rng(0)
+X = np.hstack([rng.uniform(-1, 1, size=(20, 1)), np.full((20, 1), 0.5)])
+y = np.sin(3 * X[:, :1])
+X_grid = np.hstack([np.linspace(-1, 1, 101)[:, None], np.full((101, 1), 0.5)])
+
+
+def mlp(width, parametrization="ntk"):
+    return nn.Sequential(
+        nn.Linear(2, width, parametrization=parametrization),
+        nn.ReLU(),
+        nn.Linear(width, 1, parametrization=parametrization),
+    )
+
+
+manual_seed(0)
+K = empirical_ntk(mlp(100), X).data
+print("shape", K.shape, "| symmetric:", np.allclose(K, K.T),
+      "| positive semi-definite:", np.linalg.eigvalsh(K).min() > -1e-10)
+```
+
+### The kernel at initialization concentrates with width
+
+```{python}
+fig, ax = plt.subplots(figsize=(6, 3.5))
+for width in [10, 100, 1000, 10000]:
+    values = []
+    for seed in range(10):
+        manual_seed(seed)
+        values.append(empirical_ntk(mlp(width), X[:2]).data[0, 1])
+    ax.plot([width] * 10, values, "o", alpha=0.5)
+ax.set_xscale("log")
+ax.set_xlabel("width $m$")
+ax.set_ylabel(r"$\Theta(x_1, x_2)$ at initialization (10 seeds)")
+plt.show()
+```
+
+### The kernel stays fixed during training of wide networks
+
+Full-batch gradient descent with learning rate 0.5 for 500 steps on
+$\frac{1}{2n}\lVert f(X) - y \rVert^2$, for several widths:
+
+```{python}
+def train(width, seed=0, steps=500, lr=0.5):
+    manual_seed(seed)
+    model = mlp(width)
+    K0 = empirical_ntk(model, X).data
+    K0_grid = empirical_ntk(model, X_grid, X).data
+    with no_grad():
+        f0, f0_grid = model(Tensor(X)).data, model(Tensor(X_grid)).data
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+    for _ in range(steps):
+        optimizer.zero_grad()
+        (0.5 * F.mse_loss(model(Tensor(X)), Tensor(y))).backward()
+        optimizer.step()
+    K1 = empirical_ntk(model, X).data
+    with no_grad():
+        f1_grid = model(Tensor(X_grid)).data
+    # The discrete-time version of @eq-ntk-solution with the fixed kernel K0.
+    residual, total = f0 - y, np.zeros_like(y)
+    for _ in range(steps):
+        total += residual
+        residual = residual - lr / len(X) * K0 @ residual
+    f_lin_grid = f0_grid - lr / len(X) * K0_grid @ total
+    change = np.linalg.norm(K1 - K0) / np.linalg.norm(K0)
+    return change, f1_grid, f_lin_grid
+
+
+widths = [10, 100, 1000, 10000]
+results = {width: train(width) for width in widths}
+
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.2), sharey=True)
+for ax, width in zip(axes, widths):
+    change, f1_grid, f_lin_grid = results[width]
+    ax.plot(X_grid[:, 0], f1_grid, label="trained network")
+    ax.plot(X_grid[:, 0], f_lin_grid, "--", label="fixed-kernel prediction")
+    ax.plot(X[:, 0], y, "k.")
+    ax.set_title(f"m = {width}, kernel change {change:.3f}", fontsize=9)
+axes[0].legend(fontsize=7)
+plt.show()
+```
+
+The relative change $\lVert K_T - K_0 \rVert / \lVert K_0 \rVert$ falls
+roughly like $1/\sqrt m$ (from about 30 % at $m = 10$ to 0.4 % at
+$m = 10\,000$). The agreement between the trained network and the
+fixed-kernel prediction @eq-ntk-solution becomes systematic only for large
+widths: at $m = 100$ the two curves visibly differ, at $m = 10\,000$ they
+almost coincide. (At $m = 10$ they happen to be close although the kernel
+moves a lot; a single narrow network says little, and notebook 04 averages
+over seeds.)
+
+## Exercises
+
+::: {.callout-tip title="Exercise 8.1: the NTK of one hidden layer"}
+Derive @eq-ntk-one-layer from @eq-ntk-mlp by computing
+$\partial f/\partial a_j$, $\partial f/\partial c$,
+$\partial f/\partial w_j$ and $\partial f/\partial b_j$. Check your formula
+against `empirical_ntk` for a network with $d = 3$ and $m = 50$.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$\partial f/\partial a_j = \operatorname{relu}(z_j)/\sqrt m$,
+$\partial f/\partial c = 1$,
+$\partial f/\partial w_j = a_j \mathbb 1[z_j>0]\, x/\sqrt{md}$ and
+$\partial f/\partial b_j = a_j \mathbb 1[z_j > 0]/\sqrt m$. The inner
+product of the gradients at $x$ and $x'$ is @eq-ntk-one-layer.
+
+```{python}
+d, m = 3, 50
+manual_seed(0)
+model = nn.Sequential(
+    nn.Linear(d, m, parametrization="ntk"), nn.ReLU(),
+    nn.Linear(m, 1, parametrization="ntk"),
+)
+X_check = np.random.default_rng(1).normal(size=(5, d))
+W, b = model[0].weight.data, model[0].bias.data
+a = model[2].weight.data[0]
+Z = X_check @ W.T / np.sqrt(d) + b
+H, D = np.maximum(Z, 0), (Z > 0).astype(float)
+K_formula = 1 + H @ H.T / m + ((D * a**2) @ D.T / m) * (X_check @ X_check.T / d + 1)
+print(np.abs(K_formula - empirical_ntk(model, X_check).data).max())
+```
+:::
+
+::: {.callout-tip title="Exercise 8.2: the standard parametrization"}
+Compute the mean diagonal entry of the empirical NTK at initialization for
+widths $m \in \{10, 100, 1000, 10000\}$, once with
+`parametrization="standard"` and once with `"ntk"`. What does the result
+imply for the largest stable learning rate of gradient descent?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+X4 = np.random.default_rng(0).normal(size=(4, 2))
+for width in [10, 100, 1000, 10000]:
+    traces = []
+    for parametrization in ["standard", "ntk"]:
+        manual_seed(0)
+        K4 = empirical_ntk(mlp(width, parametrization), X4).data
+        traces.append(np.trace(K4) / 4)
+    print(f"m = {width:5d}: standard {traces[0]:9.2f}, ntk {traces[1]:5.2f}")
+```
+
+In the standard parametrization the kernel grows linearly with the width
+(the gradient with respect to the output weights has $m$ entries of order
+1, with no $1/\sqrt m$), while in the NTK parametrization it converges. By
+the stability condition $\eta < 2n/\lambda_{\max}(K_0)$, the standard
+parametrization needs a learning rate that shrinks like $1/m$, and the NTK
+parametrization can use the same learning rate for every width.
+:::
+
+::: {.callout-tip title="Exercise 8.3: kernel regression with the NTK"}
+Show that for $t \to \infty$, @eq-ntk-solution gives
+$f_\infty(x) = f_0(x) + \Theta_0(x, X) K_0^{-1}(y - f_0(X))$. Which kernel
+method is this, and what plays the role of the regularization parameter
+when training is stopped at a finite time $t$?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+If $K_0$ is positive definite, $e^{-K_0 t/n} \to 0$, which gives the
+formula: kernel ridge-less regression (interpolation) of the residuals
+$y - f_0(X)$ with the kernel $\Theta_0$, plus the function at
+initialization. At finite $t$, the factor $K_0^{-1}(I - e^{-K_0 t/n})$
+damps the eigen-directions of $K_0$ with eigenvalues below about $n/t$,
+like a ridge penalty $\lambda \approx n/t$ would: early stopping is the
+regularization (@sec-regularization).
+:::
+
+## Notes and references
+
+- This chapter supports lecture 10 of *Advanced Machine Learning*
+  (neural tangent kernel), and connects to the kernel lectures.
+- The NTK and its infinite-width limit: @jacot2018neural. Wide networks as
+  linear models, for any depth: @lee2019wide. Lazy training and its limits:
+  @chizat2019lazy.
+- Example notebook `04_ntk_lazy_training` repeats the experiments with
+  several seeds and plots the relative change of the kernel and of the
+  parameters against the width.

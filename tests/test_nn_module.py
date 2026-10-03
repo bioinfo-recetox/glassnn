@@ -172,3 +172,70 @@ def test_repr_shows_the_structure():
         "  (2): Linear(in_features=3, out_features=1, bias=False)\n"
         ")"
     )
+
+
+# --------------------------------------------------------------------------
+# Buffers
+# --------------------------------------------------------------------------
+
+
+class Counter(nn.Module):
+    """A module with one parameter and two buffers (one of them None)."""
+
+    def __init__(self):
+        super().__init__()
+        self.weight = nn.Parameter(np.ones(2))
+        self.register_buffer("total", Tensor(np.zeros(2)))
+        self.register_buffer("unused", None)
+
+    def forward(self, x):
+        self.total = Tensor(self.total.data + x.data.sum(axis=0))
+        return x * self.weight
+
+
+def test_buffers_are_registered_but_are_not_parameters():
+    model = nn.Sequential(Counter(), Counter())
+    assert [n for n, _ in model.named_parameters()] == ["0.weight", "1.weight"]
+    assert [n for n, _ in model.named_buffers()] == ["0.total", "1.total"]
+    assert len(list(model.buffers())) == 2
+    assert not model[0].total.requires_grad
+
+
+def test_assigning_a_tensor_to_a_buffer_name_updates_the_buffer():
+    model = Counter()
+    model(Tensor([[1.0, 2.0], [3.0, 4.0]]))
+    np.testing.assert_array_equal(dict(model.named_buffers())["total"].data, [4, 6])
+
+
+def test_a_buffer_cannot_be_replaced_by_a_non_tensor():
+    model = Counter()
+    with pytest.raises(TypeError, match="buffer 'total'"):
+        model.total = 3.0
+
+
+def test_register_buffer_rejects_existing_attributes_and_non_tensors():
+    model = Counter()
+    with pytest.raises(KeyError, match="'weight'"):
+        model.register_buffer("weight", Tensor([0.0]))
+    with pytest.raises(TypeError, match="Tensor or None"):
+        model.register_buffer("other", np.zeros(2))
+
+
+def test_state_dict_contains_buffers_after_parameters():
+    model = nn.Sequential(Counter())
+    model(Tensor([[1.0, 1.0]]))
+    saved = model.state_dict()
+    assert list(saved) == ["0.weight", "0.total"]
+    fresh = nn.Sequential(Counter())
+    fresh.load_state_dict(saved)
+    np.testing.assert_array_equal(fresh[0].total.data, [1.0, 1.0])
+    # A missing buffer is reported like a missing parameter.
+    del saved["0.total"]
+    with pytest.raises(KeyError, match=r"missing.*'0.total'"):
+        fresh.load_state_dict(saved)
+
+
+def test_load_state_dict_checks_buffer_shapes():
+    model = Counter()
+    with pytest.raises(ValueError, match=r"total.*\(2,\).*\(3,\)"):
+        model.load_state_dict({"weight": np.ones(2), "total": np.zeros(3)})

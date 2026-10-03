@@ -24,5 +24,5 @@ The package re-exports the most used names: ``glassnn.Tensor`` is
    glassnn.nn
    glassnn.optim
    glassnn.data
-   planned
+   glassnn.analysis
    bibliography

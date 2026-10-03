@@ -299,3 +299,91 @@ def test_one_training_step_of_an_mlp(rng):
     ):
         assert name == name_t
         close(p.data, pt)
+
+
+# --------------------------------------------------------------------------
+# Normalization and dropout (milestone M3)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shape", [(6, 4), (3, 2, 4), (2, 3, 2, 4)])
+def test_layer_norm(rng, shape):
+    layer = nn.LayerNorm(shape[-1])
+    reference = torch.nn.LayerNorm(shape[-1], dtype=torch.float64)
+    layer.weight.data = rng.normal(size=shape[-1])
+    layer.bias.data = rng.normal(size=shape[-1])
+    with torch.no_grad():
+        reference.weight.copy_(torch.from_numpy(layer.weight.data))
+        reference.bias.copy_(torch.from_numpy(layer.bias.data))
+    x, xt = both(rng.normal(3.0, 2.0, size=shape))
+    upstream = rng.normal(size=shape)
+    out, out_t = layer(x), reference(xt)
+    close(out.data, out_t)
+    (out * Tensor(upstream)).sum().backward()
+    (out_t * torch.from_numpy(upstream)).sum().backward()
+    close(x.grad.data, xt.grad)
+    close(layer.weight.grad.data, reference.weight.grad)
+    close(layer.bias.grad.data, reference.bias.grad)
+
+
+def test_layer_norm_over_two_dimensions(rng):
+    x, xt = both(rng.normal(size=(3, 4, 5)))
+    out, out_t = F.layer_norm(x, (4, 5)), TF.layer_norm(xt, (4, 5))
+    close(out.data, out_t)
+    out.sum().backward()
+    (out_t * 1.0).sum().backward()
+    close(x.grad.data, xt.grad, atol=1e-10)
+
+
+@pytest.mark.parametrize("shape", [(8, 3), (4, 3, 5)])
+def test_batch_norm_training_steps_and_evaluation(rng, shape):
+    """Three training steps (outputs, gradients, running statistics), then eval."""
+    layer = nn.BatchNorm1d(3, momentum=0.3)
+    reference = torch.nn.BatchNorm1d(3, momentum=0.3, dtype=torch.float64)
+    layer.weight.data = rng.normal(size=3)
+    layer.bias.data = rng.normal(size=3)
+    with torch.no_grad():
+        reference.weight.copy_(torch.from_numpy(layer.weight.data))
+        reference.bias.copy_(torch.from_numpy(layer.bias.data))
+    for _ in range(3):
+        x, xt = both(rng.normal(1.0, 2.0, size=shape))
+        upstream = rng.normal(size=shape)
+        out, out_t = layer(x), reference(xt)
+        close(out.data, out_t)
+        (out * Tensor(upstream)).sum().backward()
+        (out_t * torch.from_numpy(upstream)).sum().backward()
+        close(x.grad.data, xt.grad)
+        close(layer.running_mean.data, reference.running_mean)
+        close(layer.running_var.data, reference.running_var)
+    close(layer.weight.grad.data, reference.weight.grad)
+    close(layer.bias.grad.data, reference.bias.grad)
+    layer.eval()
+    reference.eval()
+    x, xt = both(rng.normal(size=shape))
+    out, out_t = layer(x), reference(xt)
+    close(out.data, out_t)
+    out.sum().backward()
+    out_t.sum().backward()
+    close(x.grad.data, xt.grad)
+
+
+def test_batch_norm_state_dict_names_match_pytorch():
+    ours = set(nn.BatchNorm1d(3).state_dict())
+    theirs = set(torch.nn.BatchNorm1d(3).state_dict())
+    assert theirs - ours == {"num_batches_tracked"}  # documented difference
+    assert ours <= theirs
+
+
+def test_dropout_scaling_matches_pytorch(rng):
+    # The masks come from different generators; compare what survives.
+    x = rng.uniform(1.0, 2.0, size=(400, 500))
+    ours = F.dropout(Tensor(x), p=0.25).data
+    theirs = TF.dropout(torch.from_numpy(x), p=0.25).numpy()
+    for out in (ours, theirs):
+        kept = out != 0
+        np.testing.assert_allclose(out[kept], x[kept] / 0.75, rtol=1e-12)
+        assert kept.mean() == pytest.approx(0.75, abs=0.005)
+    np.testing.assert_array_equal(
+        F.dropout(Tensor(x), p=0.25, training=False).data,
+        TF.dropout(torch.from_numpy(x), p=0.25, training=False).numpy(),
+    )
