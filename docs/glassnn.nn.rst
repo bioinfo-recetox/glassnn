@@ -11,6 +11,8 @@ glassnn.nn
    glassnn.nn.linear
    glassnn.nn.dropout
    glassnn.nn.normalization
+   glassnn.nn.conv
+   glassnn.nn.pooling
    glassnn.nn.activation
    glassnn.nn.loss
    glassnn.nn.init

@@ -387,3 +387,81 @@ def test_dropout_scaling_matches_pytorch(rng):
         F.dropout(Tensor(x), p=0.25, training=False).data,
         TF.dropout(torch.from_numpy(x), p=0.25, training=False).numpy(),
     )
+
+
+# --------------------------------------------------------------------------
+# Convolution and pooling (milestone M4)
+# --------------------------------------------------------------------------
+
+CONV_SETTINGS = [
+    # (dims, input spatial size, kernel, stride, padding, dilation)
+    (1, (20,), 5, 1, 0, 1),
+    (1, (20,), 4, 1, "same", 1),
+    (1, (21,), 3, 2, 2, 3),
+    (2, (9, 10), 3, 1, 1, 1),
+    (2, (9, 10), (3, 2), (2, 1), "valid", (1, 2)),
+    (2, (8, 8), (2, 3), 1, "same", 1),
+]
+
+
+@pytest.mark.filterwarnings("ignore:Using padding='same'")  # PyTorch performance note
+@pytest.mark.parametrize(
+    ("dims", "size", "kernel", "stride", "padding", "dilation"), CONV_SETTINGS
+)
+def test_conv_layers(rng, dims, size, kernel, stride, padding, dilation):
+    ours = getattr(nn, f"Conv{dims}d")(3, 4, kernel, stride, padding, dilation)
+    reference = getattr(torch.nn, f"Conv{dims}d")(
+        3, 4, kernel, stride, padding, dilation, dtype=torch.float64
+    )
+    with torch.no_grad():
+        reference.weight.copy_(torch.from_numpy(ours.weight.data))
+        reference.bias.copy_(torch.from_numpy(ours.bias.data))
+    x, xt = both(rng.normal(size=(2, 3, *size)))
+    out, out_t = ours(x), reference(xt)
+    close(out.data, out_t)
+    upstream = rng.normal(size=out.shape)
+    (out * Tensor(upstream)).sum().backward()
+    (out_t * torch.from_numpy(upstream)).sum().backward()
+    close(x.grad.data, xt.grad)
+    close(ours.weight.grad.data, reference.weight.grad)
+    close(ours.bias.grad.data, reference.bias.grad)
+
+
+POOL_SETTINGS = [
+    # (dims, input spatial size, kernel, stride, padding)
+    (1, (12,), 3, None, 0),
+    (1, (13,), 4, 2, 2),
+    (1, (12,), 12, None, 0),
+    (2, (8, 9), 2, None, 0),
+    (2, (8, 9), (3, 2), (2, 1), 1),
+]
+
+
+@pytest.mark.parametrize("mode", ["max", "avg"])
+@pytest.mark.parametrize(("dims", "size", "kernel", "stride", "padding"), POOL_SETTINGS)
+def test_pooling(rng, mode, dims, size, kernel, stride, padding):
+    name = f"{mode}_pool{dims}d"
+    x, xt = both(rng.normal(size=(2, 3, *size)))
+    out = getattr(F, name)(x, kernel, stride, padding)
+    out_t = getattr(TF, name)(xt, kernel, stride, padding)
+    close(out.data, out_t)
+    upstream = rng.normal(size=out.shape)
+    (out * Tensor(upstream)).sum().backward()
+    (out_t * torch.from_numpy(upstream)).sum().backward()
+    close(x.grad.data, xt.grad)
+
+
+def test_conv_default_initialization_matches_pytorch_bounds():
+    # Same distribution (not the same numbers): compare the bounds and spread.
+    ours = nn.Conv1d(4, 500, 7)
+    theirs = torch.nn.Conv1d(4, 500, 7)
+    for p, q in [(ours.weight.data, theirs.weight), (ours.bias.data, theirs.bias)]:
+        q = q.detach().numpy()
+        assert np.abs(p).max() <= np.abs(q).max() * 1.01
+        assert p.std() == pytest.approx(q.std(), rel=0.05)
+
+
+def test_flatten(rng):
+    x, xt = both(rng.normal(size=(2, 3, 4, 5)))
+    close(nn.Flatten()(x).data, torch.nn.Flatten()(xt))
+    close(nn.Flatten(0, 2)(x).data, torch.nn.Flatten(0, 2)(xt))

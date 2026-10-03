@@ -100,6 +100,23 @@ annotated git tags.
   Bartlett et al. 2020, Jacot et al. 2018, Chizat et al. 2019, Lee et al.
   2019, Rahimi and Recht 2007.
 
+- Milestone M4 (convolutions): `glassnn.functional.conv1d`, `conv2d`
+  (stride, padding as int/tuple/"valid"/"same", dilation; im2col with
+  `sliding_window_view`, backward by scatter-add per kernel offset),
+  `max_pool1d/2d`, `avg_pool1d/2d`; modules `nn.Conv1d`, `nn.Conv2d`
+  (PyTorch's default initialization), `nn.MaxPool1d`, `nn.AvgPool1d`,
+  `nn.Flatten`.
+- Tests against slow loop implementations, gradient checks, and PyTorch
+  cross-checks for convolution, pooling, `Flatten` and the default
+  initialization of `Conv1d`.
+- `examples/dna_motifs.py` (provisional synthetic motif generator, decision
+  28) and notebook `06_cnn_dna_motif`; tests: the CNN detects and locates
+  the planted motif, and beats the spectrum kernel on mutated motifs.
+- Book: chapter 9 (convolutions for sequences); API pages for
+  `glassnn.nn.conv` and `glassnn.nn.pooling`.
+- Verified references: LeCun et al. 1998, Chellapilla et al. 2006,
+  Alipanahi et al. 2015, Zhou and Troyanskaya 2015.
+
 ### Differences from PyTorch
 
 - Optimizers have one parameter group; the learning rate is `optimizer.lr`.
@@ -120,6 +137,9 @@ annotated git tags.
   `inplace`; `F.dropout` accepts `generator=`.
 - `Linear` has a `parametrization` argument; `glassnn.analysis` has no
   PyTorch counterpart.
+- Convolutions have no `groups` and no `padding_mode`; pooling has no
+  `dilation`, `ceil_mode`, `return_indices` or `count_include_pad=False`;
+  there are no `MaxPool2d`/`AvgPool2d` modules.
 
 ## Later
 

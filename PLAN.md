@@ -311,5 +311,8 @@ Software
 | 25 | Bias in `Linear(parametrization="ntk")` | $z = x W^\top/\sqrt{n_\text{in}} + b$ with $W, b \sim \mathcal N(0, 1)$ (Lee et al. 2019 with $\sigma_w = \sigma_b = 1$); no extra argument |
 | 26 | `activation_stats` | walks a (nested) `Sequential` and records the outputs of its `Linear` layers (later also convolutions); no forward hooks; other models raise `TypeError` |
 | 27 | Example 03 (double descent) | random ReLU features (a frozen GlassNN `Linear`) with the minimum-norm least-squares readout (Rahimi and Recht 2007) |
+| 28 | Motif generator | written from scratch in `examples/dna_motifs.py` (random ACGT, one planted motif in positives, one-hot `(N, 4, L)`); provisional until checked against the lecture-5 generator |
+| 29 | Convolution arguments | `stride`, `padding` (int, tuple, `"valid"`, `"same"`; zeros only) and `dilation`; no `groups`, no `padding_mode` |
+| 30 | Example 06 | delivered with M4 (chapter 9 uses the same data and model) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.

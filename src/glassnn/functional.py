@@ -1,4 +1,4 @@
-r"""Stateless operations: activations, softmax, losses, dropout, normalization.
+r"""Stateless operations: activations, losses, normalization, convolution, pooling.
 
 Import it as ``import glassnn.functional as F``, the same way as
 ``torch.nn.functional``. Every function takes and returns tensors. Functions
@@ -9,9 +9,11 @@ tensor operations and need no backward of their own.
 
 Book chapters: :book:`Backpropagation in a multilayer perceptron
 <chapters/03-mlp.html>`; dropout and normalization:
-:book:`Regularization <chapters/06-regularization.html>`.
+:book:`Regularization <chapters/06-regularization.html>`; convolution and
+pooling: :book:`Convolutions for sequences <chapters/09-convolutions.html>`.
 """
 
+import itertools
 import math
 from typing import Any
 
@@ -19,8 +21,12 @@ from glassnn import backend
 from glassnn.tensor import Tensor, _result
 
 __all__ = [
+    "avg_pool1d",
+    "avg_pool2d",
     "batch_norm",
     "binary_cross_entropy_with_logits",
+    "conv1d",
+    "conv2d",
     "cross_entropy",
     "dropout",
     "gelu",
@@ -29,6 +35,8 @@ __all__ = [
     "linear",
     "log_softmax",
     "logsumexp",
+    "max_pool1d",
+    "max_pool2d",
     "mse_loss",
     "relu",
     "sigmoid",
@@ -601,6 +609,428 @@ def _update_running_stats(
     new_var = (1 - momentum) * running_var.data + momentum * unbiased_var
     running_mean.data = new_mean.astype(running_mean.dtype)
     running_var.data = new_var.astype(running_var.dtype)
+
+
+# ----------------------------------------------------------------------
+# Convolution and pooling
+# ----------------------------------------------------------------------
+
+
+def conv1d(
+    input: Tensor,
+    weight: Tensor,
+    bias: Tensor | None = None,
+    stride: int = 1,
+    padding: int | str = 0,
+    dilation: int = 1,
+) -> Tensor:
+    r"""1-D convolution (cross-correlation) over sequences.
+
+    For input :math:`x \in \mathbb R^{N \times C_\text{in} \times L}` (after
+    zero padding) and weight
+    :math:`w \in \mathbb R^{C_\text{out} \times C_\text{in} \times K}`,
+
+    .. math:: y_{n,o,i} = b_o + \sum_{c=1}^{C_\text{in}} \sum_{k=0}^{K-1}
+        w_{o,c,k}\, x_{n,c,\, s i + d k},
+
+    with stride :math:`s` and dilation :math:`d`; the output length is
+    :math:`L_\text{out} = \lfloor (L - d(K-1) - 1)/s \rfloor + 1`. Like
+    every deep-learning library, GlassNN calls this cross-correlation a
+    convolution (the kernel is not flipped) :cite:p:`lecun1998gradient`.
+
+    The forward pass gathers all windows :math:`x_{n,c,si+dk}` without
+    copying (``sliding_window_view``, "im2col") and contracts them with
+    :math:`w` :cite:p:`chellapilla2006high`. The backward pass is
+
+    .. math:: \bar w_{o,c,k} = \sum_{n,i} \bar y_{n,o,i}\, x_{n,c,si+dk},
+        \qquad \bar b_o = \sum_{n,i} \bar y_{n,o,i},
+        \qquad \bar x_{n,c,\,si+dk} \mathrel{+}= \sum_o \bar y_{n,o,i}\, w_{o,c,k},
+
+    the last one a scatter-add (a "transposed convolution"), done with one
+    vectorized slice per kernel offset :math:`k`.
+
+    Args:
+        input: Shape ``(N, C_in, L)``.
+        weight: Shape ``(C_out, C_in, K)``.
+        bias: Shape ``(C_out,)``, or ``None``.
+        stride: The step :math:`s` between output positions.
+        padding: Zeros added at both ends (an ``int``), ``"valid"`` (none)
+            or ``"same"`` (output length equal to input length; stride 1
+            only; an odd total padding puts the extra zero on the right).
+        dilation: The spacing :math:`d` between kernel elements.
+
+    Returns:
+        Shape ``(N, C_out, L_out)``.
+
+    Raises:
+        ValueError: For wrong shapes (the message names them), an input too
+            short for the kernel, or ``"same"`` with a stride above 1.
+
+    Note:
+        Differences from PyTorch: no ``groups`` and only zero padding.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> x = Tensor([[[1.0, 2.0, 3.0, 4.0]]])
+        >>> F.conv1d(x, Tensor([[[1.0, -1.0]]]))  # differences of neighbours
+        Tensor([[[-1., -1., -1.]]])
+    """
+    return _conv(input, weight, bias, stride, padding, dilation, 1, "conv1d")
+
+
+def conv2d(
+    input: Tensor,
+    weight: Tensor,
+    bias: Tensor | None = None,
+    stride: int | tuple[int, ...] = 1,
+    padding: int | tuple[int, ...] | str = 0,
+    dilation: int | tuple[int, ...] = 1,
+) -> Tensor:
+    r"""2-D convolution (cross-correlation) over images.
+
+    .. math:: y_{n,o,i,j} = b_o + \sum_{c} \sum_{k,l}
+        w_{o,c,k,l}\, x_{n,c,\, s_1 i + d_1 k,\, s_2 j + d_2 l}
+
+    The same computation as :func:`conv1d` with two spatial dimensions; the
+    backward pass has the same three formulas, summed over both.
+
+    Args:
+        input: Shape ``(N, C_in, H, W)``.
+        weight: Shape ``(C_out, C_in, K_H, K_W)``.
+        bias: Shape ``(C_out,)``, or ``None``.
+        stride: An ``int`` or a pair.
+        padding: An ``int``, a pair, ``"valid"`` or ``"same"``.
+        dilation: An ``int`` or a pair.
+
+    Returns:
+        Shape ``(N, C_out, H_out, W_out)``.
+
+    Raises:
+        ValueError: As :func:`conv1d`.
+
+    Note:
+        Differences from PyTorch: no ``groups`` and only zero padding.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> x = Tensor([[[[1.0, 2.0], [3.0, 4.0]]]])
+        >>> F.conv2d(x, Tensor([[[[1.0, 1.0], [1.0, 1.0]]]]))
+        Tensor([[[[10.]]]])
+    """
+    return _conv(input, weight, bias, stride, padding, dilation, 2, "conv2d")
+
+
+def max_pool1d(
+    input: Tensor, kernel_size: int, stride: int | None = None, padding: int = 0
+) -> Tensor:
+    r"""Maximum over sliding windows of a sequence.
+
+    .. math:: y_{n,c,i} = \max_{0 \le k < K} x_{n,c,\, s i + k},
+        \qquad \bar x_{n,c,\, s i + k^\star} \mathrel{+}= \bar y_{n,c,i},
+
+    where :math:`k^\star` is the position of the maximum (the first one if
+    there are ties, as in PyTorch); the other elements of the window get no
+    gradient. Padding adds :math:`-\infty`.
+
+    Args:
+        input: Shape ``(N, C, L)``.
+        kernel_size: The window length :math:`K`.
+        stride: The step :math:`s` (default: ``kernel_size``).
+        padding: :math:`-\infty` added at both ends, at most ``K // 2``.
+
+    Returns:
+        Shape ``(N, C, L_out)`` with
+        :math:`L_\text{out} = \lfloor (L + 2p - K)/s \rfloor + 1`.
+
+    Raises:
+        ValueError: For a wrong shape, too much padding, or a too short input.
+
+    Note:
+        Differences from PyTorch: no ``dilation``, ``ceil_mode`` or
+        ``return_indices``.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.max_pool1d(Tensor([[[1.0, 5.0, 2.0, 0.0]]]), kernel_size=2)
+        Tensor([[[5., 2.]]])
+    """
+    return _pool(input, kernel_size, stride, padding, 1, "max", "max_pool1d")
+
+
+def max_pool2d(
+    input: Tensor,
+    kernel_size: int | tuple[int, int],
+    stride: int | tuple[int, int] | None = None,
+    padding: int | tuple[int, int] = 0,
+) -> Tensor:
+    r"""Maximum over sliding windows of an image; see :func:`max_pool1d`.
+
+    Args:
+        input: Shape ``(N, C, H, W)``.
+        kernel_size: An ``int`` or a pair.
+        stride: An ``int`` or a pair (default: ``kernel_size``).
+        padding: An ``int`` or a pair.
+
+    Returns:
+        Shape ``(N, C, H_out, W_out)``.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.max_pool2d(Tensor([[[[1.0, 2.0], [4.0, 3.0]]]]), kernel_size=2)
+        Tensor([[[[4.]]]])
+    """
+    return _pool(input, kernel_size, stride, padding, 2, "max", "max_pool2d")
+
+
+def avg_pool1d(
+    input: Tensor, kernel_size: int, stride: int | None = None, padding: int = 0
+) -> Tensor:
+    r"""Mean over sliding windows of a sequence.
+
+    .. math:: y_{n,c,i} = \frac1K \sum_{k=0}^{K-1} x_{n,c,\, s i + k},
+        \qquad \bar x_{n,c,\, s i + k} \mathrel{+}= \frac{\bar y_{n,c,i}}{K}.
+
+    Padding adds zeros, which count in the mean (PyTorch's default
+    ``count_include_pad=True``).
+
+    Args:
+        input: Shape ``(N, C, L)``.
+        kernel_size: The window length :math:`K`.
+        stride: The step :math:`s` (default: ``kernel_size``).
+        padding: Zeros added at both ends, at most ``K // 2``.
+
+    Returns:
+        Shape ``(N, C, L_out)``.
+
+    Note:
+        Differences from PyTorch: no ``ceil_mode`` or
+        ``count_include_pad=False``.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.avg_pool1d(Tensor([[[1.0, 3.0, 2.0, 4.0]]]), kernel_size=2)
+        Tensor([[[2., 3.]]])
+    """
+    return _pool(input, kernel_size, stride, padding, 1, "avg", "avg_pool1d")
+
+
+def avg_pool2d(
+    input: Tensor,
+    kernel_size: int | tuple[int, int],
+    stride: int | tuple[int, int] | None = None,
+    padding: int | tuple[int, int] = 0,
+) -> Tensor:
+    r"""Mean over sliding windows of an image; see :func:`avg_pool1d`.
+
+    Args:
+        input: Shape ``(N, C, H, W)``.
+        kernel_size: An ``int`` or a pair.
+        stride: An ``int`` or a pair (default: ``kernel_size``).
+        padding: An ``int`` or a pair.
+
+    Returns:
+        Shape ``(N, C, H_out, W_out)``.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.avg_pool2d(Tensor([[[[1.0, 2.0], [4.0, 3.0]]]]), kernel_size=2)
+        Tensor([[[[2.5]]]])
+    """
+    return _pool(input, kernel_size, stride, padding, 2, "avg", "avg_pool2d")
+
+
+# The helpers below work for any number n of spatial dimensions. An input has
+# shape (N, C, *spatial); a "window view" has shape (N, C, *out, *kernel).
+
+_SPATIAL_NAMES = {1: "(N, C, L)", 2: "(N, C, H, W)"}
+
+
+def _ntuple(value: int | tuple[int, ...], n: int) -> tuple[int, ...]:
+    """``3`` -> ``(3,) * n``; a tuple is returned as it is."""
+    return (value,) * n if isinstance(value, int) else tuple(value)
+
+
+def _check_input(input: Tensor, n: int, name: str) -> None:
+    if input.ndim != n + 2:
+        raise ValueError(
+            f"{name} needs an input of shape {_SPATIAL_NAMES[n]}, got {input.shape}."
+        )
+
+
+def _conv_padding(
+    padding: Any, extent: tuple[int, ...], stride: tuple[int, ...], n: int
+) -> list[tuple[int, int]]:
+    """The (left, right) zero padding of each spatial dimension."""
+    if padding == "valid":
+        return [(0, 0)] * n
+    if padding == "same":
+        if any(s != 1 for s in stride):
+            raise ValueError("padding='same' needs stride 1.")
+        # The kernel covers `extent` positions; extent - 1 zeros keep the length.
+        return [((e - 1) // 2, e - 1 - (e - 1) // 2) for e in extent]
+    if isinstance(padding, str):
+        raise ValueError(
+            f"padding must be an int, a tuple, 'valid' or 'same', got {padding!r}."
+        )
+    return [(p, p) for p in _ntuple(padding, n)]
+
+
+def _windows(
+    padded: Any,
+    extent: tuple[int, ...],
+    stride: tuple[int, ...],
+    dilation: tuple[int, ...],
+) -> Any:
+    """View of all windows, shape (N, C, *out, *kernel), without copying."""
+    n = len(extent)
+    view = backend.xp.lib.stride_tricks.sliding_window_view(
+        padded, extent, axis=tuple(range(2, 2 + n))
+    )
+    keep = tuple(slice(None, None, s) for s in stride)
+    spaced = tuple(slice(None, None, d) for d in dilation)
+    return view[(slice(None), slice(None), *keep, *spaced)]
+
+
+def _offset_slices(
+    offset: tuple[int, ...],
+    out_shape: tuple[int, ...],
+    stride: tuple[int, ...],
+    dilation: tuple[int, ...],
+) -> tuple[slice, ...]:
+    """Positions s * i + d * k of the input, for all output positions i."""
+    return tuple(
+        slice(d * k, d * k + s * (m - 1) + 1, s)
+        for k, m, s, d in zip(offset, out_shape, stride, dilation, strict=True)
+    )
+
+
+def _check_length(
+    padded_shape: tuple[int, ...], extent: tuple[int, ...], input: Tensor, other: Any
+) -> None:
+    if any(size < e for size, e in zip(padded_shape, extent, strict=True)):
+        raise ValueError(
+            f"The input is too short for the kernel: input of shape {input.shape}, "
+            f"{other}."
+        )
+
+
+def _conv(
+    input: Tensor,
+    weight: Tensor,
+    bias: Tensor | None,
+    stride: Any,
+    padding: Any,
+    dilation: Any,
+    n: int,
+    name: str,
+) -> Tensor:
+    """Convolution with n spatial dimensions; see conv1d for the formulas."""
+    xp = backend.xp
+    _check_input(input, n, name)
+    if weight.ndim != n + 2 or weight.shape[1] != input.shape[1]:
+        raise ValueError(
+            f"{name}: an input of shape {input.shape} needs a weight of shape "
+            f"(C_out, {input.shape[1]}, ...) with {n} kernel dimensions, "
+            f"got {weight.shape}."
+        )
+    if bias is not None and bias.shape != weight.shape[:1]:
+        raise ValueError(
+            f"{name}: a weight of shape {weight.shape} needs a bias of shape "
+            f"{weight.shape[:1]}, got {bias.shape}."
+        )
+    kernel = weight.shape[2:]
+    stride, dilation = _ntuple(stride, n), _ntuple(dilation, n)
+    extent = tuple(d * (k - 1) + 1 for k, d in zip(kernel, dilation, strict=True))
+    pads = _conv_padding(padding, extent, stride, n)
+    padded = xp.pad(input.data, [(0, 0), (0, 0), *pads])
+    _check_length(padded.shape[2:], extent, input, f"weight of shape {weight.shape}")
+    windows = _windows(padded, extent, stride, dilation)
+    out_shape = windows.shape[2 : 2 + n]
+
+    # Contract channels and kernel offsets: (N, *out, C_out) -> (N, C_out, *out).
+    window_axes = [1, *range(2 + n, 2 + 2 * n)]
+    weight_axes = list(range(1, 2 + n))
+    out = xp.moveaxis(
+        xp.tensordot(windows, weight.data, (window_axes, weight_axes)), -1, 1
+    )
+    if bias is not None:
+        out = out + bias.data.reshape(-1, *([1] * n))
+
+    def backward(grad):
+        batch_and_out = [0, *range(2, 2 + n)]
+        grad_weight = xp.tensordot(grad, windows, (batch_and_out, batch_and_out))
+        grad_padded = xp.zeros(padded.shape, dtype=padded.dtype)
+        for offset in itertools.product(*[range(k) for k in kernel]):
+            w_k = weight.data[(slice(None), slice(None), *offset)]  # (C_out, C_in)
+            contribution = xp.moveaxis(xp.tensordot(grad, w_k, ([1], [0])), -1, 1)
+            where = _offset_slices(offset, out_shape, stride, dilation)
+            grad_padded[(slice(None), slice(None), *where)] += contribution
+        crop = tuple(
+            slice(left, left + size)
+            for (left, _), size in zip(pads, input.shape[2:], strict=True)
+        )
+        grad_input = grad_padded[(slice(None), slice(None), *crop)]
+        if bias is None:
+            return grad_input, grad_weight
+        return grad_input, grad_weight, grad.sum(axis=tuple(batch_and_out))
+
+    parents = (input, weight) if bias is None else (input, weight, bias)
+    return _result(out, parents, backward, name)
+
+
+def _pool(
+    input: Tensor,
+    kernel_size: Any,
+    stride: Any,
+    padding: Any,
+    n: int,
+    mode: str,
+    name: str,
+) -> Tensor:
+    """Max or average pooling with n spatial dimensions."""
+    xp = backend.xp
+    _check_input(input, n, name)
+    kernel = _ntuple(kernel_size, n)
+    stride = kernel if stride is None else _ntuple(stride, n)
+    pads = _ntuple(padding, n)
+    if any(2 * p > k for p, k in zip(pads, kernel, strict=True)):
+        raise ValueError(
+            f"{name}: the padding {pads} must be at most half the kernel size {kernel}."
+        )
+    fill = -xp.inf if mode == "max" else 0.0
+    padded = xp.pad(
+        input.data, [(0, 0), (0, 0), *[(p, p) for p in pads]], constant_values=fill
+    )
+    _check_length(padded.shape[2:], kernel, input, f"kernel size {kernel}")
+    ones = (1,) * n
+    windows = _windows(padded, kernel, stride, ones)
+    out_shape = windows.shape[2 : 2 + n]
+    flat = windows.reshape(*windows.shape[: 2 + n], -1)  # one axis for the window
+    if mode == "max":
+        argmax = flat.argmax(axis=-1)  # the first maximum
+        out = xp.take_along_axis(flat, argmax[..., None], axis=-1)[..., 0]
+    else:
+        out = flat.mean(axis=-1)
+
+    def backward(grad):
+        grad_padded = xp.zeros(padded.shape, dtype=padded.dtype)
+        offsets = itertools.product(*[range(k) for k in kernel])
+        for index, offset in enumerate(offsets):
+            share = grad * (argmax == index) if mode == "max" else grad / flat.shape[-1]
+            where = _offset_slices(offset, out_shape, stride, ones)
+            grad_padded[(slice(None), slice(None), *where)] += share
+        crop = tuple(
+            slice(p, p + size) for p, size in zip(pads, input.shape[2:], strict=True)
+        )
+        return (grad_padded[(slice(None), slice(None), *crop)],)
+
+    return _result(out, (input,), backward, name)
 
 
 # ----------------------------------------------------------------------
