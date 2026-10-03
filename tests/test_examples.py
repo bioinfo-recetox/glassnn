@@ -1,4 +1,4 @@
-"""The expected findings of the example notebooks 01 to 05, at a small scale.
+"""The expected findings of the example notebooks 01 to 06, at a small scale.
 
 Each test reproduces the experiment of one notebook in ``examples/`` with
 the same recipe (data, model, optimizer) but fewer repetitions, and asserts
@@ -6,8 +6,12 @@ the finding that the notebook and the book state. The notebooks themselves
 are executed by a separate CI job (``examples/_execute.py``).
 """
 
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 import pytest
+from sklearn.svm import SVC
 
 import glassnn.functional as F
 from glassnn import Tensor, backend, manual_seed, nn, no_grad, optim
@@ -265,3 +269,80 @@ def test_05_early_stopping_beats_training_to_zero_error_on_noisy_labels(
     assert history[-1][0] == 1.0  # the noise is memorized
     assert history[best][0] < 1.0  # ... but not yet at the best epoch
     assert validation[best] > validation[-1] + 0.015
+
+
+# --------------------------------------------------------------------------
+# 06_cnn_dna_motif: a 1-D CNN finds a planted motif
+# --------------------------------------------------------------------------
+
+_PATH = Path(__file__).resolve().parents[1] / "examples" / "dna_motifs.py"
+_spec = importlib.util.spec_from_file_location("dna_motifs", _PATH)
+dna_motifs = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(dna_motifs)
+
+
+def motif_data(mutation_rate):
+    sequences, labels, positions = dna_motifs.make_motif_dataset(
+        2000, mutation_rate=mutation_rate, seed=1
+    )
+    return sequences[:1000], sequences[1000:], labels[:1000], labels[1000:], positions
+
+
+def train_motif_cnn(train_sequences, train_labels, seed=0):
+    """Conv1d (16 filters of width 8) -> ReLU -> global max pool -> Linear."""
+    X = dna_motifs.one_hot(train_sequences)
+    manual_seed(seed)
+    model = nn.Sequential(
+        nn.Conv1d(4, 16, kernel_size=8),
+        nn.ReLU(),
+        nn.MaxPool1d(X.shape[2] - 8 + 1),
+        nn.Flatten(),
+        nn.Linear(16, 2),
+    )
+    optimizer = optim.Adam(model.parameters(), lr=0.003)
+    for _ in range(30):
+        for xb, yb in DataLoader(X, train_labels, batch_size=32, shuffle=True):
+            optimizer.zero_grad()
+            F.cross_entropy(model(xb), yb).backward()
+            optimizer.step()
+    return model
+
+
+def cnn_accuracy(model, sequences, labels):
+    with no_grad():
+        logits = model(Tensor(dna_motifs.one_hot(sequences))).data
+    return float((logits.argmax(axis=1) == labels).mean())
+
+
+@pytest.fixture
+def float32():
+    backend.set_default_dtype("float32")
+
+
+def test_06_cnn_detects_and_locates_the_exact_motif(float32):
+    train_s, test_s, train_y, test_y, positions = motif_data(0.0)
+    model = train_motif_cnn(train_s, train_y)
+    assert cnn_accuracy(model, test_s, test_y) > 0.95
+    # The filter that votes most for "motif" fires at a fixed offset from it.
+    votes = model[4].weight.data[1] - model[4].weight.data[0]
+    best = int(np.argmax(votes))
+    positives = test_y == 1
+    with no_grad():
+        responses = model[0](Tensor(dna_motifs.one_hot(test_s))).data[positives, best]
+    offsets = responses.argmax(axis=1) - positions[1000:][positives]
+    values, counts = np.unique(offsets, return_counts=True)
+    assert counts.max() / counts.sum() > 0.9
+    assert abs(values[counts.argmax()]) < 8  # the window overlaps the motif
+
+
+def test_06_cnn_beats_the_spectrum_kernel_on_mutated_motifs(float32):
+    train_s, test_s, train_y, test_y, _ = motif_data(0.15)
+    cnn = cnn_accuracy(train_motif_cnn(train_s, train_y), test_s, test_y)
+    spectrum = max(
+        SVC(kernel="linear", C=C)
+        .fit(dna_motifs.kmer_counts(train_s, k), train_y)
+        .score(dna_motifs.kmer_counts(test_s, k), test_y)
+        for k in (3, 4, 5)  # k = 6 is slower and not better here
+        for C in (0.001, 0.01, 0.1)
+    )
+    assert cnn > spectrum + 0.03
