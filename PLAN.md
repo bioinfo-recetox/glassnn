@@ -268,8 +268,11 @@ Generalization
 - Jacot, Gabriel and Hongler (2018), Neural tangent kernel, *NeurIPS*.
 - Chizat, Oyallon and Bach (2019), On lazy training in differentiable programming, *NeurIPS*.
 - Lee et al. (2019), Wide neural networks of any depth evolve as linear models under gradient descent, *NeurIPS*.
+- Rahimi and Recht (2007), Random features for large-scale kernel machines, *NIPS* (example 03).
 
 Biology applications
+- Leslie, Eskin and Noble (2002), The spectrum kernel: a string kernel for SVM protein classification, *Pacific Symposium on Biocomputing* (example 06).
+- Leslie, Eskin, Cohen, Weston and Noble (2004), Mismatch string kernels for discriminative protein classification, *Bioinformatics* 20 (example 06).
 - Alipanahi, Delong, Weirauch and Frey (2015), Predicting the sequence specificities of DNA- and RNA-binding proteins by deep learning, *Nature Biotechnology* 33.
 - Zhou and Troyanskaya (2015), Predicting effects of noncoding variants with deep learning-based sequence model, *Nature Methods* 12.
 - Rives et al. (2021), Biological structure and function emerge from scaling unsupervised learning to 250 million protein sequences, *PNAS* 118.
@@ -294,7 +297,7 @@ Software
 | 8 | GPU extra | only `cupy-cuda13x` (extra `gpu`) |
 | 9 | Docstring style | Google style (`CLAUDE.md` updated to match) |
 | 10 | Motif generator | a small copy of the lecture-5 generator lives in `examples/` |
-| 11 | In-place exceptions | `nn.init.*_`, `clip_grad_norm_` and `Optimizer.step()` modify parameter data in place by design; documented as the only exceptions |
+| 11 | In-place exceptions | `nn.init.*_`, `clip_grad_norm_` and `Optimizer.step()` modify parameter data in place by design, and `F.batch_norm` (hence `BatchNorm1d` in training mode) replaces the data of its running-statistics buffers, as in PyTorch; documented as the only exceptions |
 | 12 | Quarto | pinned to 1.10.18 in CI |
 | 13 | Gradients kept | leaf tensors only; `retain_grad()` keeps an intermediate gradient (as in PyTorch) |
 | 14 | Type of `.grad` | a `Tensor` with `requires_grad=False` (as in PyTorch) |
@@ -311,8 +314,11 @@ Software
 | 25 | Bias in `Linear(parametrization="ntk")` | $z = x W^\top/\sqrt{n_\text{in}} + b$ with $W, b \sim \mathcal N(0, 1)$ (Lee et al. 2019 with $\sigma_w = \sigma_b = 1$); no extra argument |
 | 26 | `activation_stats` | walks a (nested) `Sequential` and records the outputs of its `Linear` layers (later also convolutions); no forward hooks; other models raise `TypeError` |
 | 27 | Example 03 (double descent) | random ReLU features (a frozen GlassNN `Linear`) with the minimum-norm least-squares readout (Rahimi and Recht 2007) |
-| 28 | Motif generator | written from scratch in `examples/dna_motifs.py` (random ACGT, one planted motif in positives, one-hot `(N, 4, L)`); provisional until checked against the lecture-5 generator |
+| 28 | Motif generator | written from scratch in `examples/dna_motifs.py` (random ACGT, one planted motif in positives, one-hot `(N, 4, L)`); final: the lecture-5 generator is not copied (owner, 2026-10-04) |
 | 29 | Convolution arguments | `stride`, `padding` (int, tuple, `"valid"`, `"same"`; zeros only) and `dilation`; no `groups`, no `padding_mode` |
 | 30 | Example 06 | delivered with M4 (chapter 9 uses the same data and model) |
+| 31 | Example notebooks | stored without outputs; the book shows the results and CI executes the notebooks |
+| 32 | Baseline in example 06 | the $(k, m)$-mismatch kernel (Leslie et al. 2004) next to the spectrum kernel |
+| 33 | 2-D pooling modules | `MaxPool2d` and `AvgPool2d`, for symmetry with `Conv2d` |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.

@@ -298,3 +298,18 @@ def test_pooling_modules_and_flatten(rng):
 def test_flatten_gradient(rng):
     x = leaf(rng.normal(size=(2, 3, 4)))
     assert gradcheck(nn.Flatten(), [x])
+
+
+def test_2d_pooling_modules(rng):
+    x = Tensor(rng.normal(size=(2, 3, 7, 8)))
+    np.testing.assert_array_equal(nn.MaxPool2d(2)(x).data, F.max_pool2d(x, 2).data)
+    np.testing.assert_array_equal(
+        nn.AvgPool2d((3, 2), stride=(2, 1), padding=1)(x).data,
+        F.avg_pool2d(x, (3, 2), (2, 1), 1).data,
+    )
+    assert nn.MaxPool2d(2)(x).shape == (2, 3, 3, 4)
+    assert repr(nn.MaxPool2d(2)) == "MaxPool2d(kernel_size=2, stride=2, padding=0)"
+    assert repr(nn.AvgPool2d((3, 2), (2, 1))) == (
+        "AvgPool2d(kernel_size=(3, 2), stride=(2, 1), padding=0)"
+    )
+    assert not list(nn.MaxPool2d(2).parameters())

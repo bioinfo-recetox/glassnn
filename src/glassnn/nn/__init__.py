@@ -22,11 +22,12 @@ from glassnn.nn.loss import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from glassnn.nn.module import Module, Sequential
 from glassnn.nn.normalization import BatchNorm1d, LayerNorm
 from glassnn.nn.parameter import Parameter
-from glassnn.nn.pooling import AvgPool1d, Flatten, MaxPool1d
+from glassnn.nn.pooling import AvgPool1d, AvgPool2d, Flatten, MaxPool1d, MaxPool2d
 
 __all__ = [
     "GELU",
     "AvgPool1d",
+    "AvgPool2d",
     "BCEWithLogitsLoss",
     "BatchNorm1d",
     "Conv1d",
@@ -40,6 +41,7 @@ __all__ = [
     "LogSoftmax",
     "MSELoss",
     "MaxPool1d",
+    "MaxPool2d",
     "Module",
     "Parameter",
     "ReLU",

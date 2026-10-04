@@ -17,7 +17,7 @@ from _helpers import api_link, see_also, show_source, src_link
   forward pass by gathering windows (im2col) and the backward pass by a
   scatter-add.
 - Train a small CNN that finds a planted motif, and compare it with the
-  spectrum kernel (example notebook 06).
+  spectrum and mismatch kernels (example notebook 06).
 
 ## Theory
 
@@ -148,8 +148,7 @@ first maximum of every window, @eq-max-pool-grad
 ::: {.callout-warning title="Differences from PyTorch"}
 - No `groups` and only zero padding (no `padding_mode`).
 - Pooling has no `dilation`, `ceil_mode`, `return_indices` or
-  `count_include_pad=False`; there are no `MaxPool2d`/`AvgPool2d` modules
-  (use the functions).
+  `count_include_pad=False`.
 :::
 
 The tests compare every case of convolution and pooling with a slow loop
@@ -234,11 +233,14 @@ plt.show()
 
 The filter that votes most strongly for "motif present" has learned the
 motif as a position weight matrix. Notebook 06 also shows that this filter
-fires at the motif's position, and compares the CNN with the spectrum
-kernel: both are nearly perfect for the exact motif, and the CNN is better
-by about 6 to 7 points of accuracy when 10 to 20 % of the motif bases are
-mutated, because a filter scores partial matches while the spectrum kernel
-counts exact $k$-mers.
+fires at the motif's position, and compares the CNN with two string kernels
+of lecture 5. With the exact motif, the CNN, the spectrum kernel
+[@leslie2002spectrum] and the mismatch kernel [@leslie2004mismatch] are all
+nearly perfect. When 10 to 20 % of the motif bases are mutated, the CNN is
+better than the spectrum kernel by about 6 points of accuracy, because a
+filter scores partial matches while the spectrum kernel counts exact
+$k$-mers; the mismatch kernel, which also counts $k$-mers with one
+difference, recovers a quarter to a third of that gap.
 
 ## Exercises
 
@@ -356,8 +358,9 @@ about 0.996 to 0.89.
 ## Notes and references
 
 - This chapter supports lecture 11 of *Advanced Machine Learning*
-  (convolutional networks for sequences), and builds on the spectrum kernel
-  of lecture 5.
+  (convolutional networks for sequences), and builds on the string kernels
+  of lecture 5: the spectrum kernel [@leslie2002spectrum] and the mismatch
+  kernel [@leslie2004mismatch].
 - Convolutional networks and weight sharing: @lecun1998gradient. The im2col
   formulation: @chellapilla2006high.
 - CNNs on DNA and RNA: DeepBind [@alipanahi2015predicting] learns binding
