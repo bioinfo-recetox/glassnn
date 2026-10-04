@@ -103,3 +103,18 @@ def mismatch_counts(sequences: list[str], k: int, m: int) -> np.ndarray:
     digits = (codes[:, None] // 4 ** np.arange(k - 1, -1, -1)) % 4
     hamming = (digits[:, None, :] != digits[None, :, :]).sum(axis=2)
     return kmer_counts(sequences, k) @ (hamming <= m).astype(np.float64)
+
+
+def kmer_tokens(sequences: list[str], k: int) -> np.ndarray:
+    """Overlapping k-mer token ids, shape ``(N, L - k + 1)``, values in ``[0, 4**k)``.
+
+    Token ``i`` is the code of the k-mer starting at position ``i`` (base
+    ``ACGT[c]`` has digit ``c``, most significant first), as in
+    :func:`kmer_counts`.
+    """
+    index = np.array([[ALPHABET.index(b) for b in s] for s in sequences])
+    length = index.shape[1] - k + 1
+    codes = np.zeros((len(sequences), length), dtype=np.int64)
+    for offset in range(k):
+        codes = 4 * codes + index[:, offset : offset + length]
+    return codes

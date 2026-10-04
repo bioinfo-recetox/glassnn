@@ -1,0 +1,249 @@
+# Autoencoders and representation learning {#sec-autoencoders}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, src_link
+```
+
+## Goals
+
+- Define an autoencoder as an encoder and a decoder trained to reconstruct
+  their input through a bottleneck.
+- Relate a linear autoencoder to PCA, and a nonlinear one to kernel PCA and
+  its pre-image problem (lectures 1 and 5).
+- Train an autoencoder on simulated expression data with a curved latent
+  structure and compare it with PCA and kernel PCA (example notebook 08).
+- Distinguish a good reconstruction from a useful representation.
+
+## Theory
+
+### Encoder, decoder, bottleneck
+
+An **autoencoder** is a pair of networks: an encoder
+$g_\phi: \R^D \to \R^k$ that maps an input to a *code*, and a decoder
+$h_\psi: \R^k \to \R^D$ that maps the code back. Both are trained together
+to minimize the reconstruction error
+
+$$
+\mathcal L(\phi, \psi) = \frac1N \sum_{n=1}^N
+\bigl\lVert x_n - h_\psi(g_\phi(x_n)) \bigr\rVert^2 .
+$$ {#eq-autoencoder}
+
+Without a constraint the identity map would be optimal. An
+*undercomplete* autoencoder ($k < D$) cannot copy its input; it must find a
+$k$-dimensional summary from which the input can be rebuilt. No labels are
+needed: the data supervise themselves. @hinton2006reducing showed that deep
+autoencoders, trained well, find much better low-dimensional codes than PCA
+on images and documents.
+
+### The linear case is PCA
+
+With a linear encoder $g(x) = W_e x$ and decoder $h(c) = W_d c$ (and
+centered data), $h(g(x)) = W_d W_e x$ is a linear map of rank at most $k$.
+The best rank-$k$ approximation of the data in the squared error is the
+projection onto the first $k$ principal components, so the optimal linear
+autoencoder spans the same subspace as PCA. It does not, in general, find
+the principal components themselves: any invertible $C$ gives the same
+reconstruction with $W_e \to C W_e$ and $W_d \to W_d C^{-1}$ (Exercise 11.1).
+Nonlinear encoders and decoders can follow a *curved* low-dimensional
+structure, which PCA can only approximate with more components.
+
+### Kernel PCA and the pre-image problem
+
+Kernel PCA [@scholkopf1998nonlinear] performs PCA in the feature space of
+a kernel $k(x, x') = \langle \varphi(x), \varphi(x') \rangle$, which gives
+nonlinear components of the data (lecture 5). It has an encoder but no
+decoder: a point in feature space, such as the projection of
+$\varphi(x)$ on the first components, need not be the image $\varphi(z)$ of
+any input $z$. Finding an approximate *pre-image* is a separate problem;
+scikit-learn learns a regression from the components back to the inputs
+[@bakir2003learning]. An autoencoder learns its decoder together with its
+encoder, for the same objective.
+
+### What makes a representation useful?
+
+The code of an autoencoder is a *learned representation*. A good
+reconstruction means that the code keeps the information in the input; it
+does not mean that the code is convenient for a particular task, such as
+separating cell types or predicting a phenotype. Representation learning
+asks which properties make codes useful: disentangling the factors of
+variation, smoothness, invariance to irrelevant changes, and the like
+[@bengio2013representation]. Variants of the autoencoder add such
+preferences: denoising autoencoders reconstruct clean inputs from corrupted
+ones, sparse autoencoders penalize active code units, and variational
+autoencoders give the code a probability distribution.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+An autoencoder needs no new library code. Encoder and decoder are
+`{python} api_link("glassnn.nn.Sequential")` models of
+`{python} api_link("glassnn.nn.Linear")` layers and activations such as
+`{python} api_link("glassnn.nn.GELU")`; @eq-autoencoder is
+`{python} api_link("glassnn.functional.mse_loss")` with the input as its
+own target, minimized with `{python} api_link("glassnn.optim.Adam")`. The
+data loader needs some labels; the training loop below passes zeros and
+ignores them.
+
+The data come from `examples/expression.py`: cells on a branching, curved
+trajectory in a 2-D latent space, about 200 genes as nonlinear functions of
+the latent position, and multiplicative noise
+([source](https://github.com/bioinfo-recetox/glassnn/blob/main/examples/expression.py)).
+
+`{python} see_also("glassnn.data.DataLoader", "glassnn.nn.Module.state_dict")`
+:::
+
+## Try it
+
+The setting of notebook 08: 1000 training cells and 1000 test cells, every
+gene standardized with the training mean and standard deviation.
+
+```{python}
+import sys
+
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.decomposition import PCA
+
+import glassnn.functional as F
+from glassnn import Tensor, backend, manual_seed, nn, no_grad, optim
+from glassnn.data import DataLoader
+
+sys.path.insert(0, "../examples")
+from expression import CELL_TYPES, make_expression_data
+
+backend.set_default_dtype("float32")
+X_train_raw, z_train, type_train = make_expression_data(1000, seed=0)
+X_test_raw, _, type_test = make_expression_data(1000, seed=10)
+mean, std = X_train_raw.mean(axis=0), X_train_raw.std(axis=0)
+X_train, X_test = (X_train_raw - mean) / std, (X_test_raw - mean) / std
+
+
+def mse(a, b):
+    return float(((a - b) ** 2).mean())
+
+
+def train_autoencoder(activation=nn.GELU, code=2, epochs=60):
+    manual_seed(0)
+    encoder = nn.Sequential(nn.Linear(200, 64), activation(), nn.Linear(64, code))
+    decoder = nn.Sequential(nn.Linear(code, 64), activation(), nn.Linear(64, 200))
+    model = nn.Sequential(encoder, decoder)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    for _ in range(epochs):
+        for xb, _ in DataLoader(X_train, np.zeros(len(X_train)), batch_size=64, shuffle=True):
+            optimizer.zero_grad()
+            F.mse_loss(model(xb), xb).backward()
+            optimizer.step()
+    return encoder, model
+
+
+encoder, autoencoder = train_autoencoder()
+with no_grad():
+    print(f"autoencoder, 2-D code: test MSE {mse(X_test, autoencoder(Tensor(X_test)).data):.3f}")
+for k in [2, 3, 4, 5]:
+    pca = PCA(k).fit(X_train)
+    print(f"PCA, {k} components:    test MSE {mse(X_test, pca.inverse_transform(pca.transform(X_test))):.3f}")
+```
+
+The autoencoder with a 2-D code reconstructs about as well as PCA with 4
+to 5 components. Notebook 08 adds kernel PCA: with 2 components and the
+best of three kernel widths, its pre-image reconstruction (test MSE 0.43)
+is worse than 2-D PCA (0.38).
+
+```{python}
+with no_grad():
+    code = encoder(Tensor(X_test)).data
+pca_code = PCA(2).fit(X_train).transform(X_test)
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
+for ax, (title, points) in zip(axes, [("PCA", pca_code), ("autoencoder", code)], strict=True):
+    for t, name in enumerate(CELL_TYPES):
+        ax.scatter(*points[type_test == t].T, s=4, label=name)
+    ax.set_title(f"2-D code: {title}")
+axes[0].legend(markerscale=3, fontsize=8)
+plt.show()
+```
+
+Both codes show the progenitor cells and the two branches. A
+nearest-neighbour classifier recovers the cell type from either code with
+about the same accuracy (0.91 and 0.92 in notebook 08): the better
+reconstruction does not translate into a better code for this task.
+
+## Exercises
+
+::: {.callout-tip title="Exercise 11.1: a linear autoencoder finds the PCA subspace"}
+Train an autoencoder with one linear layer $200 \to 2$ as encoder and one
+linear layer $2 \to 200$ as decoder (no biases, the data are centered).
+Compare the subspace spanned by the decoder's columns with the first two
+principal components, and the training error with that of 2-D PCA.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+```{python}
+backend.set_default_dtype("float64")
+manual_seed(0)
+linear = nn.Sequential(nn.Linear(200, 2, bias=False), nn.Linear(2, 200, bias=False))
+optimizer = optim.Adam(linear.parameters(), lr=3e-3)
+for _ in range(200):
+    for xb, _ in DataLoader(X_train, np.zeros(len(X_train)), batch_size=100, shuffle=True):
+        optimizer.zero_grad()
+        F.mse_loss(linear(xb), xb).backward()
+        optimizer.step()
+pca = PCA(2).fit(X_train)
+decoder_basis, _ = np.linalg.qr(linear[1].weight.data)
+cosines = np.linalg.svd(decoder_basis.T @ pca.components_.T, compute_uv=False)
+with no_grad():
+    linear_error = mse(X_train, linear(Tensor(X_train)).data)
+print("cosines of the principal angles:", cosines.round(4))
+print(f"training MSE: linear autoencoder {linear_error:.4f}, "
+      f"PCA {mse(X_train, pca.inverse_transform(pca.transform(X_train))):.4f}")
+```
+
+Both cosines are 1: the decoder spans the plane of the first two principal
+components, and the errors agree. Its two columns are not the principal
+components themselves (they need not be orthogonal or ordered by
+variance).
+:::
+
+::: {.callout-tip title="Exercise 11.2: a 1-D code"}
+Train the nonlinear autoencoder with a 1-D code. Plot the code against the
+true latent coordinates of the cells. Can one number describe a branching
+trajectory?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+A branching trajectory is not a curve, so one number cannot describe it
+exactly. With the settings above, the 1-D code puts branch B at the
+negative end, the progenitors in the middle and branch A at the positive
+end: it unrolls the tree into a line through the branch point. The test
+error rises from about 0.27 (2-D code) to 0.43, and a nearest-neighbour
+classifier recovers the cell type less well (about 0.84 instead of 0.92),
+because cells near the branch point of the two branches get similar codes.
+:::
+
+::: {.callout-tip title="Exercise 11.3: a denoising autoencoder"}
+Add Gaussian noise of standard deviation 0.5 to each training batch before
+it enters the encoder, but keep the clean batch as the target. Compare the
+test reconstruction error and the 2-D code with the plain autoencoder.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The target is the clean input, so the network must learn to remove noise
+rather than to copy. Here the 2-D bottleneck already prevents copying, and
+the denoising autoencoder ends with the same test error (about 0.27) and
+an equally good code (kNN accuracy about 0.91) as the plain one. Denoising
+matters more for wide bottlenecks, which could otherwise learn the
+identity.
+:::
+
+## Notes and references
+
+- This chapter supports lecture 11 of *Advanced Machine Learning*
+  (representation learning), and builds on PCA and kernel PCA (lectures 1
+  and 5).
+- Deep autoencoders against PCA: @hinton2006reducing. Kernel PCA:
+  @scholkopf1998nonlinear; learning pre-images: @bakir2003learning.
+- A review of representation learning, including denoising and sparse
+  autoencoders: @bengio2013representation.
+- Example notebook `08_autoencoder_expression`.

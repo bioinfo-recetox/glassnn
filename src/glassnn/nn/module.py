@@ -1,6 +1,6 @@
 """``Module``, the base class of all layers and models, and ``Sequential``."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
 from glassnn import backend
@@ -349,3 +349,48 @@ class Sequential(Module):
         if isinstance(index, slice):
             return Sequential(*modules[index])
         return modules[index]
+
+
+class ModuleList(Module):
+    """A list of modules, registered so that their parameters are found.
+
+    Unlike :class:`Sequential`, a ``ModuleList`` has no ``forward``: the
+    model that owns it decides how to use the modules, e.g. in a loop.
+
+    Args:
+        modules: The initial modules (registered as ``"0"``, ``"1"``...).
+
+    Example:
+        >>> from glassnn import nn
+        >>> layers = nn.ModuleList([nn.Linear(4, 4) for _ in range(3)])
+        >>> len(layers), len(list(layers.parameters()))
+        (3, 6)
+    """
+
+    def __init__(self, modules: Iterable[Module] = ()) -> None:
+        """Register the modules in order."""
+        super().__init__()
+        self.extend(modules)
+
+    def append(self, module: Module) -> "ModuleList":
+        """Add one module at the end."""
+        setattr(self, str(len(self)), module)
+        return self
+
+    def extend(self, modules: Iterable[Module]) -> "ModuleList":
+        """Add several modules at the end."""
+        for module in modules:
+            self.append(module)
+        return self
+
+    def __len__(self) -> int:
+        """The number of modules."""
+        return len(self._modules)
+
+    def __iter__(self) -> Iterator[Module]:
+        """Iterate over the modules."""
+        return iter(self._modules.values())
+
+    def __getitem__(self, index: int) -> Module:
+        """Return one module."""
+        return list(self._modules.values())[index]

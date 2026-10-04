@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from sklearn.decomposition import PCA, KernelPCA
 from sklearn.svm import SVC
 
 import glassnn.functional as F
@@ -367,3 +368,152 @@ def test_06_cnn_beats_the_string_kernels_on_mutated_motifs(float32):
     # Allowing one mismatch per 6-mer closes part of the gap, not all of it.
     assert spectrum < mismatch
     assert cnn > mismatch + 0.02
+
+
+# --------------------------------------------------------------------------
+# 07_attention_dna_motif: a transformer encoder on the same motif data
+# --------------------------------------------------------------------------
+
+
+class TokenTransformer(nn.Module):
+    """Tokens (with a CLS token first) -> embedding + position -> encoder."""
+
+    def __init__(self, vocabulary, d_model=32):
+        super().__init__()
+        self.embed = nn.Embedding(vocabulary, d_model)
+        self.position = nn.PositionalEncoding(d_model, max_len=100)
+        layer = nn.TransformerEncoderLayer(d_model, 2, 64, dropout=0.0)
+        self.encoder = nn.TransformerEncoder(layer, 1, norm=nn.LayerNorm(d_model))
+        self.head = nn.Linear(d_model, 2)
+
+    def forward(self, tokens):
+        return self.head(self.encoder(self.position(self.embed(tokens)))[:, 0])
+
+    def cls_attention(self, tokens):
+        """Attention weights of the CLS query in the (only) layer."""
+        layer = self.encoder.layers[0]
+        with no_grad():
+            h = layer.norm1(self.position(self.embed(tokens)))
+            _, weights = layer.self_attn(h, h, h)
+        return weights.data[:, 0]
+
+
+class HybridTransformer(nn.Module):
+    """Conv1d stem -> position -> encoder -> mean over positions."""
+
+    def __init__(self, d_model=32):
+        super().__init__()
+        self.stem = nn.Conv1d(4, d_model, 5, padding="same")
+        self.position = nn.PositionalEncoding(d_model, max_len=100)
+        layer = nn.TransformerEncoderLayer(d_model, 2, 64, dropout=0.0)
+        self.encoder = nn.TransformerEncoder(layer, 1, norm=nn.LayerNorm(d_model))
+        self.head = nn.Linear(d_model, 2)
+
+    def forward(self, x):
+        h = self.position(self.stem(x).transpose(1, 2))  # (N, L, d)
+        return self.head(self.encoder(h).mean(dim=1))
+
+
+def with_cls(tokens, cls_id):
+    return np.hstack([np.full((len(tokens), 1), cls_id), tokens])
+
+
+def fit(model, X, y, epochs, lr=3e-3):
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    for _ in range(epochs):
+        for xb, yb in DataLoader(X, y, batch_size=32, shuffle=True):
+            optimizer.zero_grad()
+            F.cross_entropy(model(xb), yb).backward()
+            optimizer.step()
+    return model
+
+
+def accuracy_on(model, X, y):
+    with no_grad():
+        return float((model(Tensor(X)).data.argmax(axis=1) == y).mean())
+
+
+def test_07_single_base_tokens_fail_and_3mer_tokens_work(float32):
+    train_s, test_s, train_y, test_y, positions = motif_data(0.0)
+    single = [with_cls(dna_motifs.kmer_tokens(s, 1), 4) for s in (train_s, test_s)]
+    manual_seed(0)
+    model = fit(TokenTransformer(5), single[0], train_y, epochs=10)
+    assert accuracy_on(model, single[1], test_y) < 0.6
+
+    triple = [with_cls(dna_motifs.kmer_tokens(s, 3), 64) for s in (train_s, test_s)]
+    manual_seed(0)
+    model = fit(TokenTransformer(65), triple[0], train_y, epochs=10)
+    assert accuracy_on(model, triple[1], test_y) > 0.8
+    # The CLS token attends to the six 3-mers inside the motif.
+    positives = np.flatnonzero(test_y == 1)
+    weights = model.cls_attention(Tensor(triple[1][positives]))
+    starts = positions[1000:][positives] + 1  # +1: the CLS token comes first
+    on_motif = [w[p : p + 6].sum() for w, p in zip(weights, starts, strict=True)]
+    assert np.mean(on_motif) > 3 * 6 / weights.shape[1]
+
+
+def test_07_a_convolutional_stem_reaches_the_cnn(float32):
+    train_s, test_s, train_y, test_y, _ = motif_data(0.0)
+    manual_seed(0)
+    model = fit(HybridTransformer(), dna_motifs.one_hot(train_s), train_y, epochs=10)
+    assert accuracy_on(model, dna_motifs.one_hot(test_s), test_y) > 0.95
+
+
+# --------------------------------------------------------------------------
+# 08_autoencoder_expression: a 2-D autoencoder against PCA and kernel PCA
+# --------------------------------------------------------------------------
+
+_PATH = Path(__file__).resolve().parents[1] / "examples" / "expression.py"
+_spec = importlib.util.spec_from_file_location("expression", _PATH)
+expression = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(expression)
+
+
+def standardized_expression():
+    X_train, _, _ = expression.make_expression_data(1000, seed=0)
+    X_test, _, _ = expression.make_expression_data(1000, seed=10)
+    mean, std = X_train.mean(axis=0), X_train.std(axis=0)
+    return (X_train - mean) / std, (X_test - mean) / std
+
+
+def mean_squared_error(a, b):
+    return float(((a - b) ** 2).mean())
+
+
+def test_08_a_2d_autoencoder_beats_2d_pca_and_kernel_pca(float32):
+    X_train, X_test = standardized_expression()
+    manual_seed(0)
+    encoder = nn.Sequential(nn.Linear(200, 64), nn.GELU(), nn.Linear(64, 2))
+    decoder = nn.Sequential(nn.Linear(2, 64), nn.GELU(), nn.Linear(64, 200))
+    model = nn.Sequential(encoder, decoder)
+    with no_grad():
+        initial = mean_squared_error(X_test, model(Tensor(X_test)).data)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    for _ in range(60):
+        for xb, _ in DataLoader(
+            X_train, np.zeros(len(X_train)), batch_size=64, shuffle=True
+        ):
+            optimizer.zero_grad()
+            F.mse_loss(model(xb), xb).backward()
+            optimizer.step()
+    with no_grad():
+        autoencoder = mean_squared_error(X_test, model(Tensor(X_test)).data)
+
+    def pca_error(k):
+        pca = PCA(k).fit(X_train)
+        return mean_squared_error(X_test, pca.inverse_transform(pca.transform(X_test)))
+
+    kernel_pca = min(
+        mean_squared_error(X_test, kp.inverse_transform(kp.transform(X_test)))
+        for gamma in (0.001, 0.003, 0.01)
+        for kp in [
+            KernelPCA(
+                2, kernel="rbf", gamma=gamma, fit_inverse_transform=True, alpha=0.1
+            ).fit(X_train)
+        ]
+    )
+    assert autoencoder < initial / 3  # training reduces the reconstruction error
+    assert autoencoder < 0.8 * pca_error(2)
+    assert autoencoder < pca_error(3)  # as good as PCA with more components
+    # The approximate pre-image of kernel PCA reconstructs worse than PCA.
+    assert kernel_pca > pca_error(2)

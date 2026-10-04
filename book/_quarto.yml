@@ -27,6 +27,8 @@ book:
     - part: "Architectures"
       chapters:
         - chapters/09-convolutions.qmd
+        - chapters/10-attention.qmd
+        - chapters/11-autoencoders.qmd
     - references.qmd
 
 bibliography: ../docs/references.bib

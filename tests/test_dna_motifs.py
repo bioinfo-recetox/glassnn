@@ -61,3 +61,12 @@ def test_mismatch_counts():
     assert features[0, 1] == 1  # AC
     assert features[0, 0] == 1 and features[0, 5] == 1  # AA, CC
     assert features[0, 15] == 0  # TT differs in both positions
+
+
+def test_kmer_tokens():
+    tokens = dna_motifs.kmer_tokens(["ACGTA", "TTTTT"], k=2)
+    assert tokens.shape == (2, 4) and tokens.dtype.kind == "i"
+    np.testing.assert_array_equal(tokens[0], [1, 6, 11, 12])  # AC, CG, GT, TA
+    np.testing.assert_array_equal(tokens[1], [15] * 4)
+    counts = dna_motifs.kmer_counts(["ACGTA"], 2)[0]
+    np.testing.assert_array_equal(np.bincount(tokens[0], minlength=16), counts)
