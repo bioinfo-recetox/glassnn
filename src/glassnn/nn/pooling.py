@@ -1,4 +1,4 @@
-"""Pooling layers ``MaxPool1d`` and ``AvgPool1d``, and ``Flatten``.
+"""Max and average pooling layers (1-D and 2-D), and ``Flatten``.
 
 Book chapter: :book:`Convolutions for sequences <chapters/09-convolutions.html>`.
 """
@@ -74,6 +74,66 @@ class AvgPool1d(MaxPool1d):
     def forward(self, input: Tensor) -> Tensor:
         """Pool."""
         return F.avg_pool1d(input, self.kernel_size, self.stride, self.padding)
+
+
+class MaxPool2d(MaxPool1d):
+    r"""Maximum over sliding windows of an image.
+
+    See :func:`glassnn.functional.max_pool2d`.
+
+    Args:
+        kernel_size: The window size, an ``int`` or a pair.
+        stride: The step, an ``int`` or a pair (default: ``kernel_size``).
+        padding: :math:`-\infty` added on all sides, an ``int`` or a pair.
+
+    Shapes:
+        input: ``(N, C, H, W)``.
+        output: ``(N, C, H_out, W_out)``.
+
+    Example:
+        >>> from glassnn import Tensor, nn
+        >>> nn.MaxPool2d(2)(Tensor([[[[1.0, 2.0], [4.0, 3.0]]]]))
+        Tensor([[[[4.]]]])
+    """
+
+    def __init__(
+        self,
+        kernel_size: int | tuple[int, int],
+        stride: int | tuple[int, int] | None = None,
+        padding: int | tuple[int, int] = 0,
+    ) -> None:
+        """Store the settings."""
+        # MaxPool1d stores the three settings; here they may also be pairs.
+        super().__init__(kernel_size, stride, padding)  # type: ignore[arg-type]
+
+    def forward(self, input: Tensor) -> Tensor:
+        """Pool."""
+        return F.max_pool2d(input, self.kernel_size, self.stride, self.padding)
+
+
+class AvgPool2d(MaxPool2d):
+    """Mean over sliding windows of an image.
+
+    See :func:`glassnn.functional.avg_pool2d`.
+
+    Args:
+        kernel_size: The window size, an ``int`` or a pair.
+        stride: The step, an ``int`` or a pair (default: ``kernel_size``).
+        padding: Zeros added on all sides (they count in the mean).
+
+    Shapes:
+        input: ``(N, C, H, W)``.
+        output: ``(N, C, H_out, W_out)``.
+
+    Example:
+        >>> from glassnn import Tensor, nn
+        >>> nn.AvgPool2d(2)(Tensor([[[[1.0, 2.0], [4.0, 3.0]]]]))
+        Tensor([[[[2.5]]]])
+    """
+
+    def forward(self, input: Tensor) -> Tensor:
+        """Pool."""
+        return F.avg_pool2d(input, self.kernel_size, self.stride, self.padding)
 
 
 class Flatten(Module):

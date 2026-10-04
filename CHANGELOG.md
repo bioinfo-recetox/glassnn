@@ -109,9 +109,14 @@ annotated git tags.
 - Tests against slow loop implementations, gradient checks, and PyTorch
   cross-checks for convolution, pooling, `Flatten` and the default
   initialization of `Conv1d`.
-- `examples/dna_motifs.py` (provisional synthetic motif generator, decision
-  28) and notebook `06_cnn_dna_motif`; tests: the CNN detects and locates
-  the planted motif, and beats the spectrum kernel on mutated motifs.
+- `examples/dna_motifs.py` (synthetic motif generator, decision 28; spectrum
+  and mismatch kernel features) and notebook `06_cnn_dna_motif`; tests: the
+  CNN detects and locates the planted motif, and on mutated motifs the
+  mismatch kernel beats the spectrum kernel and the CNN beats both.
+- `nn.MaxPool2d` and `nn.AvgPool2d` (decision 33).
+- Decisions 31-33 and the extended decision 11 recorded in `PLAN.md`;
+  verified references Leslie et al. 2002 (spectrum kernel) and 2004
+  (mismatch kernel).
 - Book: chapter 9 (convolutions for sequences); API pages for
   `glassnn.nn.conv` and `glassnn.nn.pooling`.
 - Verified references: LeCun et al. 1998, Chellapilla et al. 2006,
@@ -138,8 +143,7 @@ annotated git tags.
 - `Linear` has a `parametrization` argument; `glassnn.analysis` has no
   PyTorch counterpart.
 - Convolutions have no `groups` and no `padding_mode`; pooling has no
-  `dilation`, `ceil_mode`, `return_indices` or `count_include_pad=False`;
-  there are no `MaxPool2d`/`AvgPool2d` modules.
+  `dilation`, `ceil_mode`, `return_indices` or `count_include_pad=False`.
 
 ## Later
 

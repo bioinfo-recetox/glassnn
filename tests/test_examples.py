@@ -335,14 +335,35 @@ def test_06_cnn_detects_and_locates_the_exact_motif(float32):
     assert abs(values[counts.argmax()]) < 8  # the window overlaps the motif
 
 
-def test_06_cnn_beats_the_spectrum_kernel_on_mutated_motifs(float32):
+def best_svm_accuracy(train_features, train_y, test_features, test_y, Cs):
+    return max(
+        SVC(kernel="linear", C=C)
+        .fit(train_features, train_y)
+        .score(test_features, test_y)
+        for C in Cs
+    )
+
+
+def test_06_cnn_beats_the_string_kernels_on_mutated_motifs(float32):
     train_s, test_s, train_y, test_y, _ = motif_data(0.15)
     cnn = cnn_accuracy(train_motif_cnn(train_s, train_y), test_s, test_y)
     spectrum = max(
-        SVC(kernel="linear", C=C)
-        .fit(dna_motifs.kmer_counts(train_s, k), train_y)
-        .score(dna_motifs.kmer_counts(test_s, k), test_y)
+        best_svm_accuracy(
+            dna_motifs.kmer_counts(train_s, k),
+            train_y,
+            dna_motifs.kmer_counts(test_s, k),
+            test_y,
+            Cs=(0.001, 0.01, 0.1),
+        )
         for k in (3, 4, 5)  # k = 6 is slower and not better here
-        for C in (0.001, 0.01, 0.1)
     )
-    assert cnn > spectrum + 0.03
+    mismatch = best_svm_accuracy(
+        dna_motifs.mismatch_counts(train_s, 6, 1),
+        train_y,
+        dna_motifs.mismatch_counts(test_s, 6, 1),
+        test_y,
+        Cs=(0.001, 0.01),
+    )
+    # Allowing one mismatch per 6-mer closes part of the gap, not all of it.
+    assert spectrum < mismatch
+    assert cnn > mismatch + 0.02

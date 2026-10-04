@@ -465,3 +465,16 @@ def test_flatten(rng):
     x, xt = both(rng.normal(size=(2, 3, 4, 5)))
     close(nn.Flatten()(x).data, torch.nn.Flatten()(xt))
     close(nn.Flatten(0, 2)(x).data, torch.nn.Flatten(0, 2)(xt))
+
+
+@pytest.mark.parametrize("mode", ["Max", "Avg"])
+def test_2d_pooling_modules(rng, mode):
+    ours = getattr(nn, f"{mode}Pool2d")((3, 2), stride=(2, 1), padding=1)
+    theirs = getattr(torch.nn, f"{mode}Pool2d")((3, 2), stride=(2, 1), padding=1)
+    x, xt = both(rng.normal(size=(2, 3, 7, 8)))
+    out, out_t = ours(x), theirs(xt)
+    close(out.data, out_t)
+    upstream = rng.normal(size=out.shape)
+    (out * Tensor(upstream)).sum().backward()
+    (out_t * torch.from_numpy(upstream)).sum().backward()
+    close(x.grad.data, xt.grad)

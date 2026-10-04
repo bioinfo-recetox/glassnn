@@ -47,3 +47,17 @@ def test_one_hot_and_kmer_counts():
     assert counts.shape == (1, 16)
     assert counts[0, 0] == 2 and counts[0, 1] == 1  # AA twice, AC once
     assert dna_motifs.kmer_counts(["ACGTACGT"], 3).sum() == 6
+
+
+def test_mismatch_counts():
+    sequences = ["ACGTTGCA", "AAAAAAAA"]
+    np.testing.assert_array_equal(
+        dna_motifs.mismatch_counts(sequences, 3, 0),
+        dna_motifs.kmer_counts(sequences, 3),
+    )
+    features = dna_motifs.mismatch_counts(["AC"], k=2, m=1)
+    # AC itself and the 3 + 3 2-mers that differ from it in one position.
+    assert features.shape == (1, 16) and features.sum() == 7
+    assert features[0, 1] == 1  # AC
+    assert features[0, 0] == 1 and features[0, 5] == 1  # AA, CC
+    assert features[0, 15] == 0  # TT differs in both positions
