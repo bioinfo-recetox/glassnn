@@ -1,0 +1,387 @@
+# Attention and the transformer encoder {#sec-attention}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- Derive scaled dot-product attention as a soft, learned lookup, and
+  explain the scaling by $\sqrt{d}$, the masks and the multiple heads.
+- Explain why attention needs positional information, and how the
+  sinusoidal encoding provides it.
+- Assemble the transformer encoder layer (pre-LN and post-LN) from
+  attention, a feed-forward network, residual connections and layer
+  normalization.
+- Apply a small transformer to DNA, and see that the choice of tokens
+  matters (example notebook 07).
+
+## Theory
+
+### Attention as a soft lookup
+
+A dictionary returns the value whose key matches the query exactly.
+Attention returns a *weighted average* of all values, with weights that
+measure how well each key matches the query. For $L$ queries
+$Q \in \R^{L \times d}$, $S$ keys $K \in \R^{S \times d}$ and values
+$V \in \R^{S \times d_v}$,
+
+$$
+A = \operatorname{softmax}\Bigl(\frac{Q K^\top}{\sqrt d} + M\Bigr),
+\qquad Z = A V ,
+$$ {#eq-attention}
+
+where the softmax normalizes each row of scores over the $S$ keys, so every
+row of $A$ is a probability distribution, and $M$ is a mask (below)
+[@vaswani2017attention]. In *self-attention* the queries, keys and values
+are all computed from the same sequence $X \in \R^{L \times E}$ by learned
+linear maps, $Q = X W^Q$, $K = X W^K$, $V = X W^V$: every position gathers
+information from the positions that are relevant to it, wherever they are.
+The cost is the $L \times S$ score matrix: quadratic in the sequence
+length, against linear for a convolution.
+
+**Why $\sqrt d$.** If the entries of a query and a key are independent with
+mean 0 and variance 1, their dot product has variance $d$
+(Exercise 10.1). Without the scaling, scores grow with the dimension, the
+softmax saturates (one weight near 1, the rest near 0), and its gradient
+vanishes. Dividing by $\sqrt d$ keeps the scores of order 1.
+
+**Gradient.** @eq-attention is a composition of matrix products, a softmax
+and an addition, so its backward pass is the chain of their backward
+passes: $\bar V = A^\top \bar Z$, $\bar A = \bar Z V^\top$, the softmax
+backward of @sec-mlp row by row, then
+$\bar Q = \bar S K / \sqrt d$ and $\bar K = \bar S^\top Q / \sqrt d$ for
+the adjoint $\bar S$ of the scores. GlassNN needs no special code for it.
+
+### Masks
+
+A mask $M$ adds $-\infty$ to the scores a query must ignore, so their
+weights are exactly 0 after the softmax. Two masks are common:
+
+- **padding masks** hide the padding at the end of shorter sequences in a
+  batch (`key_padding_mask`, one row per sequence);
+- **causal masks** hide the future, $M_{ij} = -\infty$ for $j > i$, so that
+  position $i$ depends only on positions $\le i$ (needed by decoders that
+  generate one token at a time).
+
+In GlassNN a boolean mask is always `True` where attention is
+**forbidden**, and a float mask is added to the scores. PyTorch uses this
+convention in `nn.MultiheadAttention`, but the opposite one in
+`F.scaled_dot_product_attention`.
+
+### Multiple heads
+
+One attention pattern per layer is restrictive: a position may need to look
+at several other positions for different reasons. **Multi-head attention**
+runs $h$ attentions of dimension $d = E/h$ in parallel, each with its own
+projections, and concatenates their outputs:
+
+$$
+\mathrm{head}_j = \operatorname{softmax}\Bigl(\frac{(X W^Q_j)(X W^K_j)^\top}{\sqrt d}
++ M\Bigr) X W^V_j, \qquad
+Y = [\mathrm{head}_1, \dots, \mathrm{head}_h]\, W^O .
+$$ {#eq-mha}
+
+With $W^Q = [W^Q_1, \dots, W^Q_h]$ stacked, all heads are computed with one
+$E \times E$ projection followed by a reshape from $(N, L, E)$ to
+$(N, h, L, d)$; the cost equals that of one head of size $E$.
+
+### Order and positional encodings
+
+Self-attention is **permutation equivariant**: permuting the input
+positions permutes the output in the same way, and nothing else changes
+(Exercise 10.2). For a sequence, order matters, so information about
+positions is added to the input. The sinusoidal encoding of
+@vaswani2017attention assigns to position $p$ the vector
+
+$$
+\mathrm{PE}_{p,2i} = \sin\bigl(p\, \omega_i\bigr), \qquad
+\mathrm{PE}_{p,2i+1} = \cos\bigl(p\, \omega_i\bigr), \qquad
+\omega_i = 10000^{-2i/E},
+$$ {#eq-positional}
+
+a set of clocks with geometrically spaced frequencies. Shifting the
+position by $k$ rotates every pair of coordinates by the angle
+$k\,\omega_i$, a linear map that does not depend on $p$ (Exercise 10.3), so
+relative positions are easy to read from dot products.
+
+### The transformer encoder layer
+
+A transformer encoder layer combines self-attention with a position-wise
+feed-forward network $\mathrm{FF}(x) = W_2\, \phi(W_1 x + b_1) + b_2$ (the
+same small MLP at every position, $\phi$ = GELU or ReLU), each wrapped in a
+residual connection with layer normalization (@sec-regularization). The
+original *post-LN* layer normalizes after each residual addition,
+
+$$
+x \leftarrow \mathrm{LN}_1\bigl(x + \mathrm{SA}(x)\bigr), \qquad
+x \leftarrow \mathrm{LN}_2\bigl(x + \mathrm{FF}(x)\bigr),
+$$ {#eq-post-ln}
+
+while the *pre-LN* layer, GlassNN's default, normalizes the input of each
+branch and leaves the residual path untouched:
+
+$$
+x \leftarrow x + \mathrm{SA}\bigl(\mathrm{LN}_1(x)\bigr), \qquad
+x \leftarrow x + \mathrm{FF}\bigl(\mathrm{LN}_2(x)\bigr) .
+$$ {#eq-pre-ln}
+
+In the pre-LN form the gradient reaches the first layers through an
+identity path, and deep stacks train without the careful learning-rate
+warm-up that post-LN needs [@xiong2020layer]. A pre-LN stack usually ends
+with one more layer normalization. Attention mixes information *across*
+positions; the feed-forward network transforms each position separately.
+
+### Tokens
+
+A transformer reads a sequence of **tokens**, each mapped to a learned
+vector by an embedding table (`nn.Embedding`). For DNA the obvious tokens
+are single bases, but then a motif is a conjunction of several tokens at
+adjacent positions, and one layer of attention, which *averages* value
+vectors, struggles to detect it. Tokens made of $k$ overlapping bases
+already carry local patterns. Notebook 07 shows the difference.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+`{python} api_link("glassnn.functional.scaled_dot_product_attention")` is a
+thin wrapper around a function that also returns the weights,
+@eq-attention (`{python} src_link("glassnn.functional._attention")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.functional._attention")
+```
+
+`{python} api_link("glassnn.nn.MultiheadAttention")` projects, splits the
+heads, attends and merges, @eq-mha
+(`{python} src_link("glassnn.nn.MultiheadAttention.forward")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.MultiheadAttention.forward")
+```
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.MultiheadAttention._split_heads")
+```
+
+The encoder layer, @eq-pre-ln and @eq-post-ln
+(`{python} src_link("glassnn.nn.TransformerEncoderLayer.forward")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.TransformerEncoderLayer.forward")
+```
+
+The positional encoding, @eq-positional, is a buffer computed once
+(`{python} src_link("glassnn.nn.PositionalEncoding.__init__")`).
+
+`{python} see_also("glassnn.nn.Embedding", "glassnn.nn.PositionalEncoding", "glassnn.nn.TransformerEncoder", "glassnn.nn.ModuleList", "glassnn.functional.causal_mask", "glassnn.functional.additive_mask")`
+:::
+
+::: {.callout-warning title="Differences from PyTorch"}
+- A boolean mask is `True` where attention is forbidden everywhere,
+  including `F.scaled_dot_product_attention` (PyTorch: `True` = allowed
+  there).
+- Inputs are batch-first only, `(N, L, E)`.
+- `MultiheadAttention` has three input projections `q_proj`, `k_proj`,
+  `v_proj` instead of one packed `in_proj_weight`, so `state_dict` names
+  differ; no `kdim`, `vdim`, `add_bias_kv`, `add_zero_attn`.
+- `TransformerEncoderLayer` defaults to `norm_first=True` and
+  `activation="gelu"` (PyTorch: `False` and `"relu"`).
+- `is_causal=True` without a mask builds the causal mask (PyTorch requires
+  the mask as well).
+- `PositionalEncoding` exists in GlassNN only (PyTorch's tutorials define
+  it).
+:::
+
+The tests compare attention with a NumPy implementation of @eq-mha, and
+`MultiheadAttention`, `TransformerEncoderLayer` (both variants) and
+`TransformerEncoder` with PyTorch, with padding and causal masks.
+
+## Try it
+
+### Attention by hand
+
+A query that matches the second key takes (mostly) the second value:
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, backend, manual_seed, nn
+
+backend.set_default_dtype("float64")
+keys = Tensor([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]])
+values = Tensor([[10.0], [20.0], [40.0]])
+query = Tensor([[0.0, 3.0]])  # close to the second key
+print(F.scaled_dot_product_attention(query, keys, values).data)
+hidden = Tensor([[False, True, False]])  # forbid the second key
+print(F.scaled_dot_product_attention(query, keys, values, attn_mask=hidden).data)
+```
+
+The query matches the second key best, so the output (about 21) is close
+to the second value. With the second key masked, the query has no
+preference between the other two, and the output is their mean, 25.
+
+### Positional encodings
+
+```{python}
+encoding = nn.PositionalEncoding(d_model=64, max_len=100).pe.data
+similarity = encoding @ encoding.T
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
+axes[0].imshow(encoding.T, aspect="auto", cmap="RdBu_r")
+axes[0].set_xlabel("position $p$")
+axes[0].set_ylabel("coordinate")
+axes[1].plot(similarity[50])
+axes[1].set_xlabel("position $q$")
+axes[1].set_ylabel(r"$\mathrm{PE}_{50} \cdot \mathrm{PE}_q$")
+plt.show()
+```
+
+Low coordinates oscillate fast, high ones slowly. The dot product of two
+encodings is largest for equal positions and decreases with their distance:
+the encoding makes nearby positions similar.
+
+### Masks in a layer
+
+With a causal mask, changing the end of a sequence cannot change the
+output at earlier positions; without it, every position sees the change:
+
+```{python}
+manual_seed(0)
+layer = nn.TransformerEncoderLayer(d_model=8, nhead=2, dim_feedforward=16, dropout=0.0)
+rng = np.random.default_rng(0)
+x = rng.normal(size=(1, 6, 8))
+changed = x.copy()
+changed[0, 4:] = rng.normal(size=(2, 8))  # new values at positions 4 and 5
+for causal in (True, False):
+    difference = layer(Tensor(changed), is_causal=causal).data - layer(Tensor(x), is_causal=causal).data
+    print(f"causal={causal!s:5}: largest change per position",
+          np.abs(difference[0]).max(axis=1).round(3))
+```
+
+### Transformers on DNA
+
+Notebook 07 trains a one-layer encoder (embedding size 32, two heads) on
+the motif data of @sec-convolutions, classifying from a CLS token put in
+front of the sequence. With single bases as tokens, it stays at chance
+(test accuracy 0.49). With overlapping 3-mers as tokens it reaches 0.88,
+and the CLS token puts about 42 % of its attention on the six 3-mers of the
+motif, four times their uniform share; it also attends to copies of the
+same 3-mers elsewhere, since one layer cannot check that they are
+adjacent. A `Conv1d` stem in front of the encoder reaches 0.98, close to
+the CNN of notebook 06: convolutions see local patterns directly, attention
+relates positions at any distance.
+
+## Exercises
+
+::: {.callout-tip title="Exercise 10.1: the scale of the scores"}
+Let $q, k \in \R^d$ have independent entries with mean 0 and variance 1.
+Show that $\E[q \cdot k] = 0$ and $\Var(q \cdot k) = d$. Check by sampling
+for $d = 4$ and $d = 256$.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$q \cdot k = \sum_i q_i k_i$; the terms are independent with mean
+$\E[q_i]\E[k_i] = 0$ and variance $\E[q_i^2]\E[k_i^2] = 1$, so the sum has
+mean 0 and variance $d$.
+
+```{python}
+rng = np.random.default_rng(0)
+for d in (4, 256):
+    q, k = rng.normal(size=(2, 100_000, d))
+    print(d, (q * k).sum(axis=1).var().round(1))
+```
+:::
+
+::: {.callout-tip title="Exercise 10.2: permutation equivariance"}
+Show that self-attention without masks satisfies
+$\mathrm{SA}(P X) = P\, \mathrm{SA}(X)$ for every permutation matrix $P$.
+Check it for a GlassNN `MultiheadAttention`, and check that adding a
+positional encoding breaks it.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$Q, K, V$ become $PQ, PK, PV$; the scores become
+$P Q K^\top P^\top$; the row-wise softmax commutes with permuting rows and
+columns, so $A$ becomes $P A P^\top$ and $Z$ becomes
+$P A P^\top P V = P A V$ since $P^\top P = I$.
+
+```{python}
+manual_seed(0)
+attention = nn.MultiheadAttention(8, 2)
+x = np.random.default_rng(1).normal(size=(1, 5, 8))
+order = np.array([3, 0, 4, 1, 2])
+
+
+def self_attention(a):
+    return attention(Tensor(a), Tensor(a), Tensor(a))[0].data
+
+
+print(np.abs(self_attention(x[:, order]) - self_attention(x)[:, order]).max())
+pe = nn.PositionalEncoding(8, max_len=10).pe.data[:5]
+print(np.abs(self_attention(x[:, order] + pe) - self_attention(x + pe)[:, order]).max())
+```
+
+The first difference is at rounding level, the second is not.
+:::
+
+::: {.callout-tip title="Exercise 10.3: relative positions"}
+Show that for every frequency $\omega_i$ there is a $2 \times 2$ rotation
+$R_k$, independent of $p$, with
+$(\mathrm{PE}_{p+k,2i}, \mathrm{PE}_{p+k,2i+1}) = R_k\,
+(\mathrm{PE}_{p,2i}, \mathrm{PE}_{p,2i+1})$. Check it numerically.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+With $a = p\,\omega_i$ and $b = k\,\omega_i$,
+$\sin(a + b) = \cos b \sin a + \sin b \cos a$ and
+$\cos(a + b) = -\sin b \sin a + \cos b \cos a$:
+$R_k = \begin{pmatrix} \cos b & \sin b \\ -\sin b & \cos b \end{pmatrix}$.
+
+```{python}
+encoding = nn.PositionalEncoding(d_model=16, max_len=50).pe.data
+i, k = 3, 7
+omega = 10000 ** (-2 * i / 16)
+R = np.array([[np.cos(k * omega), np.sin(k * omega)],
+              [-np.sin(k * omega), np.cos(k * omega)]])
+pairs = encoding[:, 2 * i : 2 * i + 2]
+print(np.abs(pairs[k:] - pairs[:-k] @ R.T).max())
+```
+:::
+
+::: {.callout-tip title="Exercise 10.4: parameters and cost"}
+Count the parameters of `TransformerEncoderLayer(d_model=32, nhead=2,
+dim_feedforward=64)`. How do the number of parameters and the size of the
+attention matrix change when the sequence length doubles?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+Attention: $4 (32 \cdot 32 + 32) = 4224$; feed-forward:
+$32 \cdot 64 + 64 + 64 \cdot 32 + 32 = 4192$; two layer normalizations:
+$2 \cdot 64 = 128$; in total 8544, independent of the sequence length (the
+same weights are used at every position). The attention matrix has
+$L \times L$ entries per head and sequence, so it grows fourfold when $L$
+doubles.
+
+```{python}
+layer = nn.TransformerEncoderLayer(32, 2, dim_feedforward=64)
+print(sum(p.data.size for p in layer.parameters()))
+```
+:::
+
+## Notes and references
+
+- This chapter supports lecture 11 of *Advanced Machine Learning*
+  (attention and transformers).
+- The transformer and its positional encoding: @vaswani2017attention.
+  Pre-LN against post-LN: @xiong2020layer. Layer normalization:
+  @ba2016layer.
+- Example notebook `07_attention_dna_motif`.

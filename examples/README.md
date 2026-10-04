@@ -12,10 +12,13 @@ expected finding at a smaller scale.
 | `04_ntk_lazy_training` | empirical NTK at initialization and during training, versus width | 8 |
 | `05_memorizing_noise` | random labels, label corruption, weight decay, early stopping | 6, 7 |
 | `06_cnn_dna_motif` | a 1-D CNN finds a planted motif; comparison with the spectrum and mismatch kernels | 9 |
+| `07_attention_dna_motif` | a transformer encoder on the same data: tokens, CLS attention, a convolutional stem | 10 |
+| `08_autoencoder_expression` | an autoencoder on simulated expression data, against PCA and kernel PCA | 11 |
 
 `dna_motifs.py` generates the synthetic DNA data of notebooks 06 and 07
 (`PLAN.md`, decision 28), and the features of the spectrum and mismatch
-kernels.
+kernels. `expression.py` simulates the expression data of notebook 08
+(`PLAN.md`, decision 37).
 
 The notebooks are stored without outputs. Run them in Jupyter
 (`uv sync --extra examples`, then `uv run jupyter lab` if Jupyter is
