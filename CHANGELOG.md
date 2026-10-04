@@ -122,6 +122,31 @@ annotated git tags.
 - Verified references: LeCun et al. 1998, Chellapilla et al. 2006,
   Alipanahi et al. 2015, Zhou and Troyanskaya 2015.
 
+- Milestone M5 (attention): `glassnn.functional.embedding` (with
+  `padding_idx`), `scaled_dot_product_attention` (boolean or float masks,
+  `is_causal`, `scale`, `dropout_p`), `causal_mask`, `additive_mask`;
+  modules `nn.Embedding`, `nn.PositionalEncoding` (sinusoidal, a buffer),
+  `nn.MultiheadAttention` (separate q/k/v projections, padding and
+  attention masks, weights per head or averaged), `nn.TransformerEncoderLayer`
+  (pre-LN or post-LN, GELU or ReLU), `nn.TransformerEncoder`, `nn.ModuleList`.
+- Tests against NumPy references and gradient checks; PyTorch cross-checks
+  for `Embedding`, `scaled_dot_product_attention` (all mask kinds),
+  `MultiheadAttention` (masks, averaged and per-head weights),
+  `TransformerEncoderLayer` (four variants) and `TransformerEncoder` with a
+  causal mask.
+- `examples/dna_motifs.kmer_tokens`, `examples/expression.py` (decision 37)
+  and notebooks `07_attention_dna_motif` (decision 38) and
+  `08_autoencoder_expression`, with their findings asserted in
+  `tests/test_examples.py`.
+- Book: chapter 10 (attention and the transformer encoder) and chapter 11
+  (autoencoders and representation learning); API pages for
+  `glassnn.nn.embedding`, `glassnn.nn.attention`, `glassnn.nn.transformer`.
+- Verified references: Vaswani et al. 2017, Xiong et al. 2020, Hinton and
+  Salakhutdinov 2006, Bengio et al. 2013, Schölkopf et al. 1998, Bakır et
+  al. 2003.
+- The PyTorch cross-check of the default initialization of `Conv1d` is
+  seeded and compares with the theoretical spread (it failed occasionally).
+
 ### Differences from PyTorch
 
 - Optimizers have one parameter group; the learning rate is `optimizer.lr`.
@@ -144,6 +169,13 @@ annotated git tags.
   PyTorch counterpart.
 - Convolutions have no `groups` and no `padding_mode`; pooling has no
   `dilation`, `ceil_mode`, `return_indices` or `count_include_pad=False`.
+- Boolean attention masks are `True` where attention is forbidden, also in
+  `F.scaled_dot_product_attention` (PyTorch: `True` = allowed there).
+- Attention and transformer modules are batch-first only;
+  `MultiheadAttention` has `q_proj`/`k_proj`/`v_proj` instead of a packed
+  `in_proj_weight`; `TransformerEncoderLayer` defaults to `norm_first=True`
+  and `activation="gelu"`; `is_causal=True` without a mask builds the
+  causal mask; `PositionalEncoding` is not part of PyTorch.
 
 ## Later
 

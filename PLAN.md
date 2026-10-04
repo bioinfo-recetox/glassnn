@@ -320,5 +320,10 @@ Software
 | 31 | Example notebooks | stored without outputs; the book shows the results and CI executes the notebooks |
 | 32 | Baseline in example 06 | the $(k, m)$-mismatch kernel (Leslie et al. 2004) next to the spectrum kernel |
 | 33 | 2-D pooling modules | `MaxPool2d` and `AvgPool2d`, for symmetry with `Conv2d` |
+| 34 | `MultiheadAttention` layout | inputs `(N, L, E)` only (`batch_first=True` is the only accepted value); four `Linear` sub-modules `q_proj`, `k_proj`, `v_proj`, `out_proj` instead of PyTorch's packed `in_proj_weight`; returns `(output, weights averaged over heads)` like PyTorch |
+| 35 | Boolean attention masks | one convention everywhere: `True` = masked out (as `nn.MultiheadAttention`); `F.scaled_dot_product_attention` therefore differs from PyTorch (where `True` = may attend), documented; float masks are added to the scores |
+| 36 | `TransformerEncoderLayer` | PyTorch's arguments (`norm_first`, `activation` "relu"/"gelu", `dim_feedforward`, `dropout`, `layer_norm_eps`), batch-first only, defaults `norm_first=True` and `activation="gelu"` (PLAN section 4.4); both variants cross-checked |
+| 37 | Data of example 08 | `examples/expression.py`: cells on a curved, branching trajectory in a 2-D latent space, about 200 genes as nonlinear (softplus) functions of the latent coordinates, log-normal noise, log-expression |
+| 38 | Tokens in example 07 | main model: overlapping 3-mer tokens plus a CLS token, classification from the CLS output, attention of CLS inspected; single-base tokens shown to fail; a second, hybrid model: `Conv1d` stem + transformer encoder, mean-pooled over positions (no concatenation op needed) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.

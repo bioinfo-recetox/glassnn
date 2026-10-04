@@ -13,6 +13,9 @@ glassnn.nn
    glassnn.nn.normalization
    glassnn.nn.conv
    glassnn.nn.pooling
+   glassnn.nn.embedding
+   glassnn.nn.attention
+   glassnn.nn.transformer
    glassnn.nn.activation
    glassnn.nn.loss
    glassnn.nn.init

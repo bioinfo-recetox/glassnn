@@ -15,14 +15,17 @@ from glassnn.nn.activation import (
     Softplus,
     Tanh,
 )
+from glassnn.nn.attention import MultiheadAttention
 from glassnn.nn.conv import Conv1d, Conv2d
 from glassnn.nn.dropout import Dropout
+from glassnn.nn.embedding import Embedding, PositionalEncoding
 from glassnn.nn.linear import Linear
 from glassnn.nn.loss import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from glassnn.nn.module import Module, Sequential
+from glassnn.nn.module import Module, ModuleList, Sequential
 from glassnn.nn.normalization import BatchNorm1d, LayerNorm
 from glassnn.nn.parameter import Parameter
 from glassnn.nn.pooling import AvgPool1d, AvgPool2d, Flatten, MaxPool1d, MaxPool2d
+from glassnn.nn.transformer import TransformerEncoder, TransformerEncoderLayer
 
 __all__ = [
     "GELU",
@@ -34,6 +37,7 @@ __all__ = [
     "Conv2d",
     "CrossEntropyLoss",
     "Dropout",
+    "Embedding",
     "Flatten",
     "LayerNorm",
     "LeakyReLU",
@@ -43,12 +47,17 @@ __all__ = [
     "MaxPool1d",
     "MaxPool2d",
     "Module",
+    "ModuleList",
+    "MultiheadAttention",
     "Parameter",
+    "PositionalEncoding",
     "ReLU",
     "Sequential",
     "Sigmoid",
     "Softmax",
     "Softplus",
     "Tanh",
+    "TransformerEncoder",
+    "TransformerEncoderLayer",
     "init",
 ]

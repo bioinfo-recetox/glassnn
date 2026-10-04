@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 import glassnn.functional as F
-from glassnn import Tensor, nn, optim
+from glassnn import Tensor, manual_seed, nn, optim
 from glassnn.nn import init
 
 torch = pytest.importorskip("torch", reason="PyTorch is not installed")
@@ -452,13 +452,23 @@ def test_pooling(rng, mode, dims, size, kernel, stride, padding):
 
 
 def test_conv_default_initialization_matches_pytorch_bounds():
-    # Same distribution (not the same numbers): compare the bounds and spread.
+    # Same distribution (not the same numbers): both are uniform on
+    # [-b, b] with b = 1 / sqrt(C_in * K), whose standard deviation is
+    # b / sqrt(3). Seeded, with tolerances of several standard errors.
+    manual_seed(0)
+    torch.manual_seed(0)
     ours = nn.Conv1d(4, 500, 7)
     theirs = torch.nn.Conv1d(4, 500, 7)
-    for p, q in [(ours.weight.data, theirs.weight), (ours.bias.data, theirs.bias)]:
+    bound = 1 / math.sqrt(4 * 7)
+    pairs = [
+        (ours.weight.data, theirs.weight, 0.03),  # 14000 values
+        (ours.bias.data, theirs.bias, 0.15),  # 500 values
+    ]
+    for p, q, rel in pairs:
         q = q.detach().numpy()
-        assert np.abs(p).max() <= np.abs(q).max() * 1.01
-        assert p.std() == pytest.approx(q.std(), rel=0.05)
+        for values in (p, q):
+            assert np.abs(values).max() <= bound
+            assert values.std() == pytest.approx(bound / math.sqrt(3), rel=rel)
 
 
 def test_flatten(rng):
@@ -477,4 +487,212 @@ def test_2d_pooling_modules(rng, mode):
     upstream = rng.normal(size=out.shape)
     (out * Tensor(upstream)).sum().backward()
     (out_t * torch.from_numpy(upstream)).sum().backward()
+    close(x.grad.data, xt.grad)
+
+
+# --------------------------------------------------------------------------
+# Embedding, attention and the transformer encoder (milestone M5)
+# --------------------------------------------------------------------------
+
+
+def test_embedding(rng):
+    ours = nn.Embedding(6, 3, padding_idx=2)
+    theirs = torch.nn.Embedding(6, 3, padding_idx=2, dtype=torch.float64)
+    with torch.no_grad():
+        theirs.weight.copy_(torch.from_numpy(ours.weight.data))
+    index = rng.integers(0, 6, size=(4, 5))
+    out, out_t = ours(Tensor(index)), theirs(torch.from_numpy(index))
+    close(out.data, out_t)
+    upstream = rng.normal(size=out.shape)
+    (out * Tensor(upstream)).sum().backward()
+    (out_t * torch.from_numpy(upstream)).sum().backward()
+    close(ours.weight.grad.data, theirs.weight.grad)
+
+
+@pytest.mark.parametrize("mask_kind", ["none", "bool", "float", "causal"])
+def test_scaled_dot_product_attention(rng, mask_kind):
+    q, qt = both(rng.normal(size=(2, 3, 4, 5)))
+    k, kt = both(rng.normal(size=(2, 3, 6, 5)))
+    v, vt = both(rng.normal(size=(2, 3, 6, 7)))
+    kwargs, kwargs_t = {}, {}
+    if mask_kind == "bool":
+        masked = rng.uniform(size=(4, 6)) < 0.3
+        masked[:, 0] = False  # every query sees at least one key
+        kwargs = {"attn_mask": Tensor(masked)}
+        kwargs_t = {"attn_mask": torch.from_numpy(~masked)}  # PyTorch: True = attend
+    elif mask_kind == "float":
+        bias = rng.normal(size=(4, 6))
+        kwargs = {"attn_mask": Tensor(bias)}
+        kwargs_t = {"attn_mask": torch.from_numpy(bias)}
+    elif mask_kind == "causal":
+        q, qt = both(rng.normal(size=(2, 3, 6, 5)))
+        kwargs = kwargs_t = {"is_causal": True}
+    out = F.scaled_dot_product_attention(q, k, v, **kwargs)
+    out_t = TF.scaled_dot_product_attention(qt, kt, vt, **kwargs_t)
+    close(out.data, out_t)
+    upstream = rng.normal(size=out.shape)
+    (out * Tensor(upstream)).sum().backward()
+    (out_t * torch.from_numpy(upstream)).sum().backward()
+    for ours, theirs in [(q, qt), (k, kt), (v, vt)]:
+        close(ours.grad.data, theirs.grad)
+
+
+def copy_attention(ours, theirs):
+    """Copy GlassNN's q/k/v/out projections into PyTorch's packed parameters."""
+    with torch.no_grad():
+        theirs.in_proj_weight.copy_(
+            torch.from_numpy(
+                np.concatenate(
+                    [
+                        ours.q_proj.weight.data,
+                        ours.k_proj.weight.data,
+                        ours.v_proj.weight.data,
+                    ]
+                )
+            )
+        )
+        theirs.in_proj_bias.copy_(
+            torch.from_numpy(
+                np.concatenate(
+                    [
+                        ours.q_proj.bias.data,
+                        ours.k_proj.bias.data,
+                        ours.v_proj.bias.data,
+                    ]
+                )
+            )
+        )
+        theirs.out_proj.weight.copy_(torch.from_numpy(ours.out_proj.weight.data))
+        theirs.out_proj.bias.copy_(torch.from_numpy(ours.out_proj.bias.data))
+
+
+def attention_gradients(module):
+    return [
+        module.q_proj.weight,
+        module.k_proj.weight,
+        module.v_proj.weight,
+        module.out_proj.weight,
+    ]
+
+
+@pytest.mark.parametrize("masks", ["none", "padding", "attn", "both"])
+@pytest.mark.parametrize("average", [True, False])
+def test_multihead_attention(rng, masks, average):
+    ours = nn.MultiheadAttention(8, 2)
+    theirs = torch.nn.MultiheadAttention(8, 2, batch_first=True, dtype=torch.float64)
+    for layer in [ours.q_proj, ours.k_proj, ours.v_proj, ours.out_proj]:
+        layer.bias.data = rng.normal(size=8)
+    copy_attention(ours, theirs)
+    x, xt = both(rng.normal(size=(3, 5, 8)))
+    memory, memory_t = both(rng.normal(size=(3, 6, 8)))
+    kwargs = {}
+    if masks in ("padding", "both"):
+        padding = np.zeros((3, 6), dtype=bool)
+        padding[1, 4:] = True
+        kwargs["key_padding_mask"] = padding
+    if masks in ("attn", "both"):
+        hidden = rng.uniform(size=(5, 6)) < 0.3
+        hidden[:, 0] = False
+        kwargs["attn_mask"] = hidden
+    out, weights = ours(
+        x,
+        memory,
+        memory,
+        average_attn_weights=average,
+        **{k: Tensor(v) for k, v in kwargs.items()},
+    )
+    out_t, weights_t = theirs(
+        xt,
+        memory_t,
+        memory_t,
+        average_attn_weights=average,
+        **{k: torch.from_numpy(v) for k, v in kwargs.items()},
+    )
+    close(out.data, out_t)
+    close(weights.data, weights_t)
+    upstream = rng.normal(size=out.shape)
+    (out * Tensor(upstream)).sum().backward()
+    (out_t * torch.from_numpy(upstream)).sum().backward()
+    close(x.grad.data, xt.grad)
+    close(memory.grad.data, memory_t.grad)
+    in_grad = np.concatenate([p.grad.data for p in attention_gradients(ours)[:3]])
+    close(in_grad, theirs.in_proj_weight.grad)
+    close(ours.out_proj.weight.grad.data, theirs.out_proj.weight.grad)
+
+
+def copy_encoder_layer(ours, theirs):
+    copy_attention(ours.self_attn, theirs.self_attn)
+    with torch.no_grad():
+        for name in ["linear1", "linear2", "norm1", "norm2"]:
+            for attribute in ["weight", "bias"]:
+                getattr(getattr(theirs, name), attribute).copy_(
+                    torch.from_numpy(getattr(getattr(ours, name), attribute).data)
+                )
+
+
+@pytest.mark.parametrize("norm_first", [True, False])
+@pytest.mark.parametrize("activation", ["gelu", "relu"])
+def test_transformer_encoder_layer(rng, norm_first, activation):
+    ours = nn.TransformerEncoderLayer(
+        8,
+        2,
+        dim_feedforward=16,
+        dropout=0.0,
+        activation=activation,
+        norm_first=norm_first,
+    )
+    theirs = torch.nn.TransformerEncoderLayer(
+        8,
+        2,
+        dim_feedforward=16,
+        dropout=0.0,
+        activation=activation,
+        norm_first=norm_first,
+        batch_first=True,
+        dtype=torch.float64,
+    )
+    copy_encoder_layer(ours, theirs)
+    x, xt = both(rng.normal(size=(3, 5, 8)))
+    padding = np.zeros((3, 5), dtype=bool)
+    padding[2, 3:] = True
+    out = ours(x, src_key_padding_mask=Tensor(padding))
+    out_t = theirs(xt, src_key_padding_mask=torch.from_numpy(padding))
+    close(out.data, out_t)
+    upstream = rng.normal(size=out.shape)
+    (out * Tensor(upstream)).sum().backward()
+    (out_t * torch.from_numpy(upstream)).sum().backward()
+    close(x.grad.data, xt.grad)
+    close(ours.linear1.weight.grad.data, theirs.linear1.weight.grad)
+    close(ours.norm2.weight.grad.data, theirs.norm2.weight.grad)
+
+
+def test_transformer_encoder_with_causal_mask(rng):
+    layer = nn.TransformerEncoderLayer(8, 2, dim_feedforward=16, dropout=0.0)
+    ours = nn.TransformerEncoder(layer, 2, norm=nn.LayerNorm(8))
+    torch_layer = torch.nn.TransformerEncoderLayer(
+        8,
+        2,
+        dim_feedforward=16,
+        dropout=0.0,
+        activation="gelu",
+        norm_first=True,
+        batch_first=True,
+        dtype=torch.float64,
+    )
+    theirs = torch.nn.TransformerEncoder(
+        torch_layer,
+        2,
+        norm=torch.nn.LayerNorm(8, dtype=torch.float64),
+        enable_nested_tensor=False,
+    )
+    for i in range(2):
+        ours.layers[i].linear1.weight.data = rng.normal(size=(16, 8)) * 0.3
+        copy_encoder_layer(ours.layers[i], theirs.layers[i])
+    x, xt = both(rng.normal(size=(2, 6, 8)))
+    causal = np.triu(np.ones((6, 6), dtype=bool), k=1)
+    out = ours(x, mask=Tensor(causal), is_causal=True)
+    out_t = theirs(xt, mask=torch.from_numpy(causal), is_causal=True)
+    close(out.data, out_t)
+    out.sum().backward()
+    out_t.sum().backward()
     close(x.grad.data, xt.grad)

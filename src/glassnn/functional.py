@@ -10,7 +10,8 @@ tensor operations and need no backward of their own.
 Book chapters: :book:`Backpropagation in a multilayer perceptron
 <chapters/03-mlp.html>`; dropout and normalization:
 :book:`Regularization <chapters/06-regularization.html>`; convolution and
-pooling: :book:`Convolutions for sequences <chapters/09-convolutions.html>`.
+pooling: :book:`Convolutions for sequences <chapters/09-convolutions.html>`;
+embedding and attention: :book:`Attention <chapters/10-attention.html>`.
 """
 
 import itertools
@@ -21,14 +22,17 @@ from glassnn import backend
 from glassnn.tensor import Tensor, _result
 
 __all__ = [
+    "additive_mask",
     "avg_pool1d",
     "avg_pool2d",
     "batch_norm",
     "binary_cross_entropy_with_logits",
+    "causal_mask",
     "conv1d",
     "conv2d",
     "cross_entropy",
     "dropout",
+    "embedding",
     "gelu",
     "layer_norm",
     "leaky_relu",
@@ -39,6 +43,7 @@ __all__ = [
     "max_pool2d",
     "mse_loss",
     "relu",
+    "scaled_dot_product_attention",
     "sigmoid",
     "softmax",
     "softplus",
@@ -1031,6 +1036,211 @@ def _pool(
         return (grad_padded[(slice(None), slice(None), *crop)],)
 
     return _result(out, (input,), backward, name)
+
+
+# ----------------------------------------------------------------------
+# Embedding and attention
+# ----------------------------------------------------------------------
+
+
+def embedding(input: Any, weight: Tensor, padding_idx: int | None = None) -> Tensor:
+    r"""Look up rows of an embedding matrix.
+
+    For integer indices :math:`i_j` and weight
+    :math:`W \in \mathbb R^{V \times D}`,
+
+    .. math:: z_j = W_{i_j}, \qquad \bar W_v = \sum_{j : i_j = v} \bar z_j ,
+
+    the same as multiplying one-hot vectors by :math:`W`, without building
+    them. The row ``padding_idx`` receives no gradient, so it stays as it
+    was initialized (zeros in :class:`glassnn.nn.Embedding`).
+
+    Args:
+        input: Integer indices in :math:`[0, V)`, any shape (Tensor or
+            array).
+        weight: Shape ``(V, D)``.
+        padding_idx: A row that gets no gradient, or ``None``.
+
+    Returns:
+        Shape ``(*input.shape, D)``.
+
+    Raises:
+        TypeError: If the indices are not integers.
+        IndexError: If an index is outside :math:`[0, V)`.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.embedding(Tensor([2, 0]), Tensor([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]]))
+        Tensor([[4., 5.],
+                [0., 1.]])
+    """
+    xp = backend.xp
+    index = _to_tensor(input).data
+    if index.dtype.kind not in "iu":
+        raise TypeError(f"embedding needs integer indices, got dtype {index.dtype}.")
+    rows = weight.shape[0]
+    if index.size and (index.min() < 0 or index.max() >= rows):
+        raise IndexError(
+            f"embedding indices must be in [0, {rows}), got values from "
+            f"{int(index.min())} to {int(index.max())}."
+        )
+
+    def backward(grad):
+        grad_weight = xp.zeros(weight.shape, dtype=grad.dtype)
+        xp.add.at(grad_weight, index, grad)
+        if padding_idx is not None:
+            grad_weight[padding_idx] = 0
+        return (grad_weight,)
+
+    return _result(weight.data[index], (weight,), backward, "embedding")
+
+
+def scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Tensor | None = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale: float | None = None,
+) -> Tensor:
+    r"""Scaled dot-product attention.
+
+    For queries :math:`Q \in \mathbb R^{L \times E}`, keys
+    :math:`K \in \mathbb R^{S \times E}` and values
+    :math:`V \in \mathbb R^{S \times E_v}` (with any leading batch
+    dimensions),
+
+    .. math:: A = \operatorname{softmax}\Bigl(\frac{Q K^\top}{\sqrt{E}} + M\Bigr),
+        \qquad Z = A V ,
+
+    where the softmax is taken over the keys (each row of :math:`A` sums to
+    1) and :math:`M` is the mask :cite:p:`vaswani2017attention`. Dividing by
+    :math:`\sqrt E` keeps the scores of order 1 when the entries of
+    :math:`Q` and :math:`K` are, so the softmax does not saturate. The
+    function is a composition of ``@``, ``softmax`` and ``+``, so its
+    gradient comes from those operations.
+
+    Args:
+        query: Shape ``(..., L, E)``.
+        key: Shape ``(..., S, E)``.
+        value: Shape ``(..., S, E_v)``.
+        attn_mask: Broadcastable to ``(..., L, S)``. A boolean mask is
+            ``True`` where a query may **not** attend to a key (that score
+            becomes :math:`-\infty`); a float mask is added to the scores.
+        dropout_p: Dropout probability on :math:`A` (global generator).
+        is_causal: Mask the keys after each query (:math:`j > i`); requires
+            ``L = S`` usage and no ``attn_mask``.
+        scale: The factor of the scores (default :math:`1/\sqrt E`).
+
+    Returns:
+        Shape ``(..., L, E_v)``.
+
+    Raises:
+        ValueError: For incompatible shapes (the message names them), or
+            both ``attn_mask`` and ``is_causal``.
+
+    Note:
+        Differences from PyTorch: a boolean mask is ``True`` where attention
+        is **forbidden**, as in ``nn.MultiheadAttention`` (PyTorch's
+        ``scaled_dot_product_attention`` uses ``True`` = allowed). A row in
+        which every key is masked gives NaN, as in PyTorch.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> q = Tensor([[1.0, 0.0]])
+        >>> kv = Tensor([[1.0, 0.0], [0.0, 1.0]])
+        >>> mask = Tensor([[False, True]])  # the second key is hidden
+        >>> F.scaled_dot_product_attention(q, kv, kv, attn_mask=mask)
+        Tensor([[1., 0.]])
+    """
+    output, _ = _attention(query, key, value, attn_mask, dropout_p, is_causal, scale)
+    return output
+
+
+def _attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Tensor | None,
+    dropout_p: float,
+    is_causal: bool,
+    scale: float | None,
+) -> tuple[Tensor, Tensor]:
+    """Scaled dot-product attention that also returns the weights A."""
+    if query.shape[-1] != key.shape[-1]:
+        raise ValueError(
+            f"Queries and keys need the same last dimension, got query shape "
+            f"{query.shape} and key shape {key.shape}."
+        )
+    if key.shape[-2] != value.shape[-2]:
+        raise ValueError(
+            f"Keys and values need the same number of positions, got key shape "
+            f"{key.shape} and value shape {value.shape}."
+        )
+    if is_causal and attn_mask is not None:
+        raise ValueError("Give either attn_mask or is_causal=True, not both.")
+    if scale is None:
+        scale = 1 / math.sqrt(query.shape[-1])
+    scores = (query @ key.transpose(-2, -1)) * scale
+    if is_causal:
+        attn_mask = causal_mask(query.shape[-2], key.shape[-2])
+    if attn_mask is not None:
+        scores = scores + additive_mask(attn_mask, scores.dtype)
+    weights = softmax(scores, dim=-1)
+    if dropout_p > 0:
+        weights = dropout(weights, dropout_p)
+    return weights @ value, weights
+
+
+def causal_mask(length: int, source_length: int | None = None) -> Tensor:
+    r"""The boolean mask that hides future positions: ``True`` where :math:`j > i`.
+
+    Args:
+        length: The number of queries :math:`L`.
+        source_length: The number of keys :math:`S` (default :math:`L`).
+
+    Returns:
+        A boolean Tensor of shape ``(L, S)``.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> F.causal_mask(3)
+        Tensor([[False,  True,  True],
+                [False, False,  True],
+                [False, False, False]])
+    """
+    source_length = length if source_length is None else source_length
+    xp = backend.xp
+    return Tensor(xp.triu(xp.ones((length, source_length), dtype=bool), k=1))
+
+
+def additive_mask(mask: Any, dtype: Any) -> Tensor:
+    r"""Turn a mask into numbers to add to attention scores.
+
+    A boolean mask becomes :math:`-\infty` where it is ``True`` (masked) and
+    0 elsewhere; a float mask is returned unchanged.
+
+    Args:
+        mask: A boolean or float Tensor (or array).
+        dtype: The dtype of the scores.
+
+    Returns:
+        A float Tensor.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.additive_mask(Tensor([True, False]), "float64")
+        Tensor([-inf,   0.])
+    """
+    mask = _to_tensor(mask)
+    if mask.dtype.kind == "b":
+        values = backend.xp.where(mask.data, -backend.xp.inf, 0.0)
+        return Tensor(values, dtype=dtype)
+    return mask
 
 
 # ----------------------------------------------------------------------
