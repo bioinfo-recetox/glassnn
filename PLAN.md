@@ -325,5 +325,6 @@ Software
 | 36 | `TransformerEncoderLayer` | PyTorch's arguments (`norm_first`, `activation` "relu"/"gelu", `dim_feedforward`, `dropout`, `layer_norm_eps`), batch-first only, defaults `norm_first=True` and `activation="gelu"` (PLAN section 4.4); both variants cross-checked |
 | 37 | Data of example 08 | `examples/expression.py`: cells on a curved, branching trajectory in a 2-D latent space, about 200 genes as nonlinear (softplus) functions of the latent coordinates, log-normal noise, log-expression |
 | 38 | Tokens in example 07 | main model: overlapping 3-mer tokens plus a CLS token, classification from the CLS output, attention of CLS inspected; single-base tokens shown to fail; a second, hybrid model: `Conv1d` stem + transformer encoder, mean-pooled over positions (no concatenation op needed) |
+| 39 | Slow findings tests | no marker: `tests/test_examples.py` runs locally and in CI with the rest of the suite (owner, 2026-10-04) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.

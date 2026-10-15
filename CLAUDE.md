@@ -6,7 +6,7 @@
 
 1. Work **one milestone at a time**, in the order of `PLAN.md` section 7. Before writing code for a milestone, write a short plan (files to create, the order, how each acceptance criterion will be tested) and wait for approval if anything is ambiguous.
 2. Write the **test first** for every op or layer, then the implementation. A feature is not done until its tests pass.
-3. Commit at the end of each milestone (small, descriptive commit messages). Do not push to `main` directly; use a branch per milestone and a pull request.
+3. Do not commit, push, create branches for commits, or open pull requests: the owner reviews the code and does all of this. At the end of each milestone, print the exact commands for the owner to run: a new branch per milestone, `git add`, small descriptive commit messages, push, and `gh pr create` (nothing goes to `main` directly). Read-only git commands (`status`, `diff`, `log`) are fine.
 4. When a design question comes up that `PLAN.md` does not answer, list the options with their trade-offs and ask. Do not decide silently.
 
 ## Commands (using uv)
