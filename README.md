@@ -28,10 +28,22 @@ pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.0"
 ### Optional GPU backend
 
 The optional GPU backend uses [CuPy](https://cupy.dev) with CUDA 13
-(`pip install "glassnn[gpu] @ git+..."`). CuPy is the "RAPIDS option": RAPIDS
-libraries (cuDF, cuML) exchange arrays with CuPy without copies through
-DLPack; GlassNN itself needs only an array library and does not depend on
-RAPIDS.
+(`pip install "glassnn[gpu] @ git+..."`; the extra also installs the CUDA
+compiler and headers, so no system CUDA toolkit is needed). One call moves
+all new tensors to the GPU:
+
+```python
+from glassnn import backend
+
+backend.set_backend("cupy")
+```
+
+A seed gives the same results on CPU and GPU. At the batch sizes of the
+lectures the CPU is as fast; the GPU pays off for large batches (book
+chapter 13). CuPy is the "RAPIDS option": RAPIDS libraries (cuDF, cuML)
+exchange arrays with CuPy without copies through DLPack
+(`backend.from_dlpack`); GlassNN itself needs only an array library and does
+not depend on RAPIDS.
 
 ## Development
 

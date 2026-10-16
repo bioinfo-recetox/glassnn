@@ -10,8 +10,15 @@ uv sync --extra dev --extra docs --extra book --extra examples
 uv run pre-commit install
 ```
 
-The `gpu` extra (`cupy-cuda13x`) needs an NVIDIA GPU with CUDA 13; install it
-only on such a machine: `uv sync --extra gpu`.
+The `gpu` extra (`cupy-cuda13x[ctk]`) needs an NVIDIA GPU with a CUDA 13
+driver; the CUDA compiler and headers come as wheels. Install it only on such
+a machine, together with the other extras (`uv sync` removes extras that are
+not named): `uv sync --extra dev --extra docs --extra book --extra examples
+--extra gpu`. On a machine with several GPUs, choose one with
+`CUDA_VISIBLE_DEVICES=1 uv run pytest -m gpu`. The GPU benchmark is
+`uv run python benchmarks/bench_backends.py`; after a change of the backend,
+re-run it with `--json book/assets/benchmark_backends.json` to refresh the
+table of book chapter 13.
 
 ## Checks
 
