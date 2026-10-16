@@ -400,7 +400,8 @@ def dropout(
         generator = backend.get_generator()
     keep = generator.random(input.shape) >= p
     scale = 0.0 if p == 1.0 else 1.0 / (1.0 - p)
-    mask = (keep * scale).astype(input.dtype)
+    # The generator draws on the host; asarray copies the mask to the GPU.
+    mask = backend.xp.asarray(keep * scale, dtype=input.dtype)
     return _result(input.data * mask, (input,), lambda grad: (grad * mask,), "dropout")
 
 

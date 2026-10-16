@@ -24,10 +24,13 @@ def test_set_backend_numpy_is_accepted():
     assert backend.xp is np
 
 
-def test_set_backend_cupy_is_not_available_yet():
-    with pytest.raises(NotImplementedError, match="M6"):
+def test_set_backend_cupy_without_cupy_names_the_extra(monkeypatch):
+    # A None entry in sys.modules makes "import cupy" raise ImportError.
+    monkeypatch.setitem(sys.modules, "cupy", None)
+    with pytest.raises(ImportError, match=r"glassnn\[gpu\]"):
         backend.set_backend("cupy")
     assert backend.get_backend() == "numpy"
+    assert backend.xp is np
 
 
 def test_set_backend_rejects_unknown_names():
@@ -116,3 +119,38 @@ def test_erf_matches_scipy():
 
     x = np.linspace(-4, 4, 17)
     np.testing.assert_allclose(backend.erf(x), special.erf(x))
+
+
+def test_to_numpy_does_not_copy_a_numpy_array():
+    x = np.arange(3.0)
+    assert backend.to_numpy(x) is x
+
+
+def test_the_generator_stays_numpy_whatever_the_backend():
+    # Random numbers are always drawn on the host (PLAN, decision 41).
+    assert isinstance(backend.manual_seed(0), np.random.Generator)
+
+
+def test_from_dlpack_shares_memory_with_the_producer():
+    x = np.arange(4.0)
+    y = backend.from_dlpack(x)
+    assert isinstance(y, np.ndarray)
+    assert np.shares_memory(x, y)
+
+
+@pytest.mark.torch
+def test_to_dlpack_hands_the_array_to_pytorch_without_a_copy():
+    torch = pytest.importorskip("torch")
+    x = np.arange(4.0)
+    t = torch.utils.dlpack.from_dlpack(backend.to_dlpack(x))
+    x_from_torch = t.numpy()
+    assert np.shares_memory(x, x_from_torch)
+
+
+@pytest.mark.torch
+def test_from_dlpack_accepts_a_pytorch_tensor():
+    torch = pytest.importorskip("torch")
+    t = torch.arange(4.0, dtype=torch.float64)
+    x = backend.from_dlpack(t)
+    np.testing.assert_array_equal(x, [0.0, 1.0, 2.0, 3.0])
+    assert np.shares_memory(x, t.numpy())
