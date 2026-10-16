@@ -30,8 +30,16 @@ uv run pytest -m gpu                           # CuPy parity tests (needs CuPy a
 uv run ruff check . && uv run ruff format --check .
 uv run sphinx-build -W docs docs/_build/html   # API reference
 uv run quarto render book                      # the book
-uv run python book/_check_api_links.py         # book -> API links (after both builds)
+uv run python book/_check_api_links.py         # links within and between book and API (after both builds)
+uv run sphinx-build -b linkcheck docs docs/_build/linkcheck  # external links, by hand before a release
 ```
+
+After editing `book/assets/rosetta.toml` (the table of differences from
+PyTorch), copy it into the Colab notebooks with
+`uv run python examples/colab_pytorch/_sync_rosetta.py`; `tests/test_rosetta.py`
+fails until then, and also when a docstring gains a "Differences from
+PyTorch" note without a row in the table. The Colab notebooks are executed by
+`uv run pytest -m torch` (needs the `examples` extra).
 
 ## Rules
 

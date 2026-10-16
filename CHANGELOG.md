@@ -165,6 +165,33 @@ annotated git tags.
   option), with measured times stored in `book/assets/benchmark_backends.json`
   (decision 42).
 - Verified references: Okuta et al. 2017 (CuPy), DLPack.
+- Milestone M7 (toolkits and completion): book chapter 12 (from GlassNN to
+  PyTorch) with the Rosetta table, kept in one data file
+  `book/assets/rosetta.toml` (decision 43); Colab notebooks
+  `examples/colab_pytorch/A_mlp_init.ipynb` and `B_cnn_motif.ipynb`, the
+  PyTorch versions of examples 02 and 06, each ending with the table
+  (`_sync_rosetta.py` writes it; notebook B downloads `dna_motifs.py` at the
+  pinned tag, decision 44).
+- Book appendices: A (matrix calculus for backpropagation), B (API map,
+  generated from the module docstrings), C (reading list of every cited
+  work).
+- README: a 5-minute tour, run as a doctest by `tests/test_readme.py`.
+- Complete API reference (decision 46): every public symbol has a summary,
+  arguments, return value and a doctested example; operations, layers,
+  losses, initializers, optimizers and schedulers state their mathematics;
+  methods from the literature cite it; every module links to its book
+  chapter and has an API page (new page `glassnn`). Enforced by
+  `tests/test_docstrings.py`.
+- `book/_check_api_links.py` checks every on-site link of the book and the
+  API reference in both directions, including anchors; external links are
+  checked by hand with `sphinx-build -b linkcheck`.
+- Tests: `tests/test_rosetta.py` (every documented difference has a row,
+  notebooks hold the current table), `tests/test_colab_notebooks.py`
+  (marker `torch`: the notebooks reproduce the findings of examples 02 and
+  06), `tests/test_check_links.py`. The `torch` CI job installs the
+  `examples` extra to run the notebooks.
+- Verified references: Paszke et al. 2019 (PyTorch), Blanchard, Higham and
+  Higham 2021, Goyal et al. 2017, Pascanu, Mikolov and Bengio 2013.
 
 ### Differences from PyTorch
 
@@ -203,4 +230,7 @@ annotated git tags.
 
 Features deliberately kept out of scope (see `PLAN.md`, section 10):
 
-- none yet.
+- Colab notebook C (embeddings from a pretrained protein language model such
+  as ESM-2, fed to a linear classifier): optional in `PLAN.md`, section 9;
+  deferred because it needs `transformers`, a model download and a verified
+  model name, and cannot run in CI (decision 45).

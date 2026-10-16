@@ -329,5 +329,9 @@ Software
 | 40 | CUDA headers | the `gpu` extra is `cupy-cuda13x[ctk]`: NVRTC and the CUDA headers come as wheels, no system toolkit (owner, 2026-10-15) |
 | 41 | Random numbers on the GPU | always the NumPy generator, also with the CuPy backend; draws are copied to the device, so a seed gives identical results on CPU and GPU. Replaces `cupy.random.default_rng` of section 4.1, whose generator lacks `normal` and `permutation` (owner, 2026-10-15) |
 | 42 | GPU results in the book | GPU cells of chapter 13 are not executed; the benchmark script writes `book/assets/benchmark_backends.json` (hardware, versions, date) and the chapter renders its table (owner, 2026-10-15) |
+| 43 | Rosetta table | one data file `book/assets/rosetta.toml` (TOML, read with the standard library, so the CI test job needs no extra package); chapter 12 renders it, `examples/colab_pytorch/_sync_rosetta.py` writes it into the notebooks, `tests/test_rosetta.py` requires a row for every "Differences from PyTorch" note and current copies (owner, 2026-10-16) |
+| 44 | Data of Colab notebook B | downloaded from GitHub at the pinned tag (`dna_motifs.py`); CI runs the notebook in `examples/`, where the file exists (owner, 2026-10-16) |
+| 45 | Colab notebook C | deferred to the CHANGELOG "Later" list (owner, 2026-10-16) |
+| 46 | Complete API reference | by kind: every public symbol has summary, `Args`, `Returns`, example; math for operations, layers, losses, initializers, optimizers, schedulers; references where literature exists; exemptions listed in `tests/test_docstrings.py` (owner, 2026-10-16) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.
