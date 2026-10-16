@@ -15,7 +15,7 @@ annotated git tags.
   release workflows.
 - IEEE citation style (CSL, CC BY-SA 3.0) for the book.
 - `glassnn.backend`: active array module `xp`, `get_backend`/`set_backend`
-  (NumPy; CuPy follows in M6), `get_default_dtype`/`set_default_dtype`
+  (NumPy; CuPy from M6), `get_default_dtype`/`set_default_dtype`
   (float32 by default), `asarray` with the dtype rule, `to_numpy`.
 - `glassnn.Tensor` with reverse-mode automatic differentiation: `+ - * / **`
   (scalar or tensor exponent), unary minus, `@` (vectors, matrices, batches),
@@ -146,6 +146,25 @@ annotated git tags.
   al. 2003.
 - The PyTorch cross-check of the default initialization of `Conv1d` is
   seeded and compares with the theoretical spread (it failed occasionally).
+- Milestone M6 (GPU option): `glassnn.backend.set_backend("cupy")` (CuPy is
+  imported only then, with an `ImportError` naming the `gpu` extra if it is
+  missing); `erf` follows the backend (`cupyx.scipy.special`); `to_numpy`
+  copies GPU arrays to the host; `from_dlpack` and `to_dlpack`; `asarray`
+  refuses a GPU array while the NumPy backend is active.
+- The random generator is a NumPy generator on both backends; dropout masks
+  are copied to the device, so a seed gives the same results on CPU and GPU
+  (decision 41).
+- The `gpu` extra is `cupy-cuda13x[ctk]`, which brings NVRTC and the CUDA
+  headers as wheels (decision 40).
+- Backend parity tests (marker `gpu`): every operation, layer and optimizer,
+  short training runs in float64 and float32, `empirical_ntk`,
+  `activation_stats`, `gradcheck`, DLPack and the error for mixed devices.
+- `benchmarks/bench_backends.py`: one training step of the MLP, Conv1d and
+  transformer smoke benchmarks on both backends, at batch 32 and 1024.
+- Book: chapter 13 (design notes: the backend, adding an operation, the GPU
+  option), with measured times stored in `book/assets/benchmark_backends.json`
+  (decision 42).
+- Verified references: Okuta et al. 2017 (CuPy), DLPack.
 
 ### Differences from PyTorch
 
@@ -176,6 +195,9 @@ annotated git tags.
   `in_proj_weight`; `TransformerEncoderLayer` defaults to `norm_first=True`
   and `activation="gelu"`; `is_causal=True` without a mask builds the
   causal mask; `PositionalEncoding` is not part of PyTorch.
+- The device is chosen for all new tensors at once with `set_backend`, not
+  per tensor (`x.to("cuda")`); one NumPy generator serves both devices;
+  `backend.from_dlpack` returns an array, not a tensor.
 
 ## Later
 

@@ -1,0 +1,359 @@
+# Design notes: the backend, adding an operation, the GPU option {#sec-design}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+import json
+
+from _helpers import Markdown, api_link, see_also, show_source, src_link
+```
+
+## Goals
+
+- See how one *array module*, `backend.xp`, lets the same code run on a CPU
+  (NumPy) and on an NVIDIA GPU (CuPy).
+- Add a new operation to GlassNN the way the library itself does it:
+  derivative, forward and backward code, gradient check, backend parity.
+- Predict when a GPU pays off, from a simple cost model and measured times.
+- Exchange arrays with PyTorch and the RAPIDS libraries without copies,
+  through DLPack.
+
+## Theory
+
+### One array module for two devices
+
+Every operation in GlassNN computes with `backend.xp`, never with `numpy`
+directly. `xp` is NumPy by default; `set_backend("cupy")` replaces it with
+CuPy, a library that implements the NumPy interface on NVIDIA GPUs
+[@okuta2017cupy]. `xp.exp(a)` then launches a GPU kernel instead of a CPU
+loop, and nothing else in the library changes. Three rules keep this true:
+
+1. **Only the common subset.** Operations use functions that NumPy and CuPy
+   both provide (`einsum`, `tensordot`, `where`, `add.at`, the
+   `sliding_window_view` of im2col, ...). The test suite runs every
+   operation on both backends and compares the results.
+2. **One adapter for what NumPy lacks.** NumPy has no error function, which
+   the exact GELU needs. `backend.erf` calls `scipy.special.erf` or
+   `cupyx.scipy.special.erf`, whichever matches the active backend.
+3. **`xp` is read at call time.** `from glassnn.backend import xp` would copy
+   the module that is active at import time; code writes `backend.xp`.
+
+**Randomness stays on the host.** CuPy's random generator has no
+`normal` or `permutation`, and draws different numbers from NumPy's for the
+same seed. GlassNN therefore draws every random number (initial weights,
+dropout masks, shuffled batches) with a NumPy generator on both backends,
+and copies it to the GPU. A seed gives *identical* results on CPU and GPU,
+so a model can be debugged on a laptop and trained on a GPU. The price is a
+copy per draw; for dropout that is one mask per layer and step, a small
+cost next to the arithmetic.
+
+**Tensors do not move by themselves.** A tensor is on the device of the
+backend that was active when it was created. `asarray` refuses a GPU array
+while the NumPy backend is active, instead of copying it silently:
+transfers between host and device are slow, and a hidden one in a training
+loop is hard to find. `backend.to_numpy` makes the copy explicit.
+
+### Adding an operation
+
+An operation is a forward function and a vector-Jacobian product
+(@sec-autodiff). For $z = f(a)$ elementwise, the backward function maps
+the adjoint $\bar z$ to
+
+$$
+\bar a = \bar z \odot f'(a).
+$$ {#eq-design-vjp}
+
+The recipe, which every operation of the library follows:
+
+1. Derive $\bar a$ and write it in the docstring.
+2. Write the test first: `gradcheck` against central finite differences in
+   float64, on several shapes and on hard inputs (large arguments).
+3. Implement the forward pass with `backend.xp` and return
+   `_result(data, parents, backward, name)`: the output tensor, recorded in
+   the graph only if a parent requires gradients.
+4. Add a case to the backend parity test, so that the operation is checked
+   on the GPU too.
+
+The section *Try it* adds $\sinh$ in this way.
+
+### When does a GPU pay off?
+
+A GPU runs thousands of arithmetic units in parallel, but every operation
+costs a *kernel launch* of a few microseconds before any arithmetic is
+done, and GlassNN launches one or a few kernels per operation. A training
+step with $k$ operations on a batch of $N$ examples therefore takes roughly
+
+$$
+T_{\text{GPU}}(N) \approx k\,\tau + \frac{c\,N}{R_{\text{GPU}}},
+\qquad
+T_{\text{CPU}}(N) \approx \frac{c\,N}{R_{\text{CPU}}},
+$$ {#eq-design-cost}
+
+with $\tau$ the launch latency, $c$ the arithmetic per example and $R$ the
+throughput of each device. For small batches and small layers the first
+term dominates: the GPU waits on launches, and the CPU, with negligible
+overhead per operation, is as fast or faster. For large batches and
+convolutions or attention, where $c$ is large, the GPU wins by orders of
+magnitude. The measured times below show both regimes.
+
+### Sharing arrays: DLPack and the RAPIDS option
+
+DLPack [@dlpack] is a small C structure describing an array in memory: a
+pointer, the device, the dtype, the shape and the strides. A library that
+*exports* DLPack (`array.__dlpack__()`) lets another *import* the array
+(`from_dlpack`) with no copy, on the CPU or on the GPU. NumPy, CuPy,
+PyTorch and the RAPIDS libraries all speak it.
+
+RAPIDS (cuDF, cuML) is a suite of GPU data frames and classical machine
+learning. A neural-network library needs only an array library, so the
+"RAPIDS option" of GlassNN is the CuPy backend: data prepared in cuDF
+reaches GlassNN through DLPack, and GlassNN has no dependency on RAPIDS.
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+`{python} api_link("glassnn.backend.set_backend")` swaps the array module
+and the special functions; CuPy is imported only here
+(`{python} src_link("glassnn.backend.set_backend")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.backend.set_backend")
+```
+
+```{python}
+#| echo: false
+show_source("glassnn.backend._import_cupy")
+```
+
+An explicit copy to the host, for plotting or saving
+(`{python} src_link("glassnn.backend.to_numpy")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.backend.to_numpy")
+```
+
+Every operation ends with `_result`, which records it in the graph
+(`{python} src_link("glassnn.tensor._result")`):
+
+```{python}
+#| echo: false
+show_source("glassnn.tensor._result")
+```
+
+Dropout shows the host-side randomness: the mask is drawn by the NumPy
+generator and copied to the device by `xp.asarray`
+(`{python} src_link("glassnn.functional.dropout")`).
+
+`{python} see_also("glassnn.backend.get_backend", "glassnn.backend.to_numpy", "glassnn.backend.from_dlpack", "glassnn.backend.to_dlpack", "glassnn.backend.erf", "glassnn.backend.manual_seed")`
+:::
+
+::: {.callout-warning title="Differences from PyTorch"}
+- PyTorch places each tensor on a device (`x.to("cuda")`); GlassNN switches
+  one global array module, and new tensors follow it.
+- The random generator is a NumPy generator on both backends; PyTorch has
+  one generator per device, so CPU and GPU runs differ.
+- `backend.from_dlpack` returns an array, not a tensor; wrap it with
+  `Tensor(...)`.
+:::
+
+The parity tests (`tests/test_gpu_parity.py`, marker `gpu`) run every
+operation, every layer, every optimizer and a short training run on both
+backends and compare outputs and gradients (to $10^{-10}$ relative in
+float64). They need a GPU and are run on such a machine, not in CI.
+
+## Try it
+
+### Code that runs on both backends
+
+Write array code with `backend.xp`, and it follows the backend:
+
+```{python}
+import numpy as np
+
+import glassnn.functional as F
+from glassnn import Tensor, backend, manual_seed, nn
+from glassnn.gradcheck import gradcheck
+
+
+def standardize(a):
+    xp = backend.xp
+    return (a - xp.mean(a, axis=0)) / xp.std(a, axis=0)
+
+
+x = backend.asarray(np.random.default_rng(0).normal(3.0, 2.0, size=(1000, 2)))
+print(backend.get_backend(), type(x).__module__)
+print(standardize(x).mean(axis=0).round(6), standardize(x).std(axis=0))
+```
+
+On a machine with a GPU and the `gpu` extra, the same lines run on the GPU
+after one call. This cell is not executed when the book is built:
+
+```{python}
+#| eval: false
+backend.set_backend("cupy")
+x = backend.asarray(np.random.default_rng(0).normal(3.0, 2.0, size=(1000, 2)))
+print(type(x).__module__)  # cupy
+model = nn.Sequential(nn.Linear(2, 16), nn.ReLU(), nn.Linear(16, 2))
+logits = model(Tensor(x))  # computed on the GPU
+backend.to_numpy(logits.data)  # copied back for plotting
+```
+
+### Adding $\sinh$
+
+The derivative is $\cosh$, so by @eq-design-vjp
+$\bar a = \bar z \odot \cosh a$. The forward pass computes $\cosh a$ once
+and the backward function reuses it:
+
+```{python}
+from glassnn.tensor import _result
+
+
+def sinh(a: Tensor) -> Tensor:
+    r"""Hyperbolic sine: z = sinh(a), \bar a = \bar z * cosh(a)."""
+    xp = backend.xp
+    slope = xp.cosh(a.data)
+    return _result(xp.sinh(a.data), (a,), lambda grad: (grad * slope,), "sinh")
+
+
+a = Tensor(np.linspace(-3, 3, 7), requires_grad=True, dtype="float64")
+print(gradcheck(lambda t: sinh(t), [a]))
+print(sinh(a))
+```
+
+`gradcheck` compares the backward pass with central finite differences and
+raises an error naming the element and both values at the first mismatch.
+In the library, this check is a test written before the function.
+
+### Sharing memory with DLPack
+
+`from_dlpack` makes a second view of the same memory; writing through one
+is visible through the other:
+
+```{python}
+producer = np.zeros(3)
+shared = backend.from_dlpack(producer)
+producer[0] = 42.0
+print(shared, np.shares_memory(producer, shared))
+```
+
+With the CuPy backend, the same call takes a PyTorch CUDA tensor or a cuDF
+column without leaving the GPU.
+
+### Measured: CPU against GPU
+
+The script `benchmarks/bench_backends.py` times one training step (forward,
+backward, Adam) of the three smoke-benchmark models, in float32, at batch
+32 and 1024. The table below was produced on the machine listed under it;
+it is stored with the book and not re-measured at build time.
+
+```{python}
+#| echo: false
+with open("assets/benchmark_backends.json") as file:
+    bench = json.load(file)
+lines = [
+    "| Model | Batch | NumPy (ms) | CuPy (ms) | Speed-up |",
+    "|---|---:|---:|---:|---:|",
+]
+for row in bench["rows"]:
+    speedup = row["numpy_ms"] / row["cupy_ms"]
+    lines.append(
+        f"| {row['model']} | {row['batch']} | {row['numpy_ms']:.2f} | "
+        f"{row['cupy_ms']:.2f} | {speedup:.1f}× |"
+    )
+m = bench["machine"]
+lines.append("")
+lines.append(
+    f": Median time of one training step. {m['cpu']}; {m['gpu']}; "
+    f"NumPy {m['numpy']}, CuPy {m['cupy']}; measured {m['date']}. "
+    "{#tbl-design-benchmark}"
+)
+Markdown("\n".join(lines))
+```
+
+At batch 32 the GPU gains little or loses (@tbl-design-benchmark): the
+MLP step takes about the same time at batch 32 and 1024 on the GPU, the
+signature of launch overhead in @eq-design-cost. With 1024 sequences the
+convolution and the transformer run tens to a hundred times faster on the
+GPU. For the lectures, which use batch 32 and small models, the NumPy
+backend is the right default.
+
+## Exercises
+
+::: {.callout-tip title="Exercise 13.1: where the GPU overtakes the CPU"}
+Assume, as in @eq-design-cost, that the CPU time of the MLP step is linear
+in the batch size and the GPU time is constant. From the two MLP rows of
+@tbl-design-benchmark, estimate the batch size above which the GPU is
+faster.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+A line through the two CPU points gives a slope $s$ and an intercept $b$;
+the GPU time $g$ is the mean of its two values; the crossing is at
+$N^\ast = (g - b)/s$.
+
+```{python}
+mlp = [row for row in bench["rows"] if row["model"] == "MLP"]
+(n1, t1), (n2, t2) = [(row["batch"], row["numpy_ms"]) for row in mlp]
+slope = (t2 - t1) / (n2 - n1)
+intercept = t1 - slope * n1
+gpu = np.mean([row["cupy_ms"] for row in mlp])
+print(f"crossing near batch {(gpu - intercept) / slope:.0f}")
+```
+
+For this small MLP the GPU pays off only for batches of about a thousand
+examples; wider layers move the crossing down.
+:::
+
+::: {.callout-tip title="Exercise 13.2: a softsign operation"}
+Add $\operatorname{softsign}(a) = a / (1 + |a|)$ following the recipe:
+derive $\bar a$, implement it with `backend.xp` and `_result`, and check it
+with `gradcheck`. At $a = 0$, $|a|$ is not differentiable; is softsign?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+$\frac{d}{da} \frac{a}{1 + |a|} = \frac{(1 + |a|) - a \operatorname{sign}(a)}{(1 + |a|)^2} = \frac{1}{(1 + |a|)^2}$,
+since $a \operatorname{sign}(a) = |a|$. The derivative is continuous at 0
+(it equals 1 from both sides), so softsign is differentiable everywhere,
+and $\bar a = \bar z / (1 + |a|)^2$.
+
+```{python}
+def softsign(a: Tensor) -> Tensor:
+    xp = backend.xp
+    denominator = 1 + xp.abs(a.data)
+    return _result(
+        a.data / denominator, (a,), lambda grad: (grad / denominator**2,), "softsign"
+    )
+
+
+a = Tensor([-5.0, -0.3, 0.0, 0.7, 40.0], requires_grad=True, dtype="float64")
+print(gradcheck(softsign, [a]))
+```
+:::
+
+::: {.callout-tip title="Exercise 13.3: why not copy silently?"}
+`Tensor(x)` raises an error when `x` is a GPU array and the NumPy backend
+is active, although copying it to the host would be easy. Give two reasons
+for this design.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+A copy between GPU and host goes over the PCIe bus and synchronizes the
+GPU; done silently inside a training loop, it can dominate the running time
+and is hard to find. Second, a silent copy would let tensors of both
+devices mix in one model, with results that depend on which backend was
+active when each tensor was made. The explicit `backend.to_numpy` makes
+every transfer visible in the code.
+:::
+
+## Notes and references
+
+- This chapter is not tied to a lecture; it is meant for readers who want
+  to extend GlassNN or run it on a GPU.
+- CuPy: @okuta2017cupy. DLPack: @dlpack.
+- The parity tests and the benchmark script are in `tests/test_gpu_parity.py`
+  and `benchmarks/bench_backends.py`; install the GPU extra with
+  `uv sync --extra gpu` (CUDA 13; the extra brings the CUDA compiler and
+  headers as wheels, so no system toolkit is needed).

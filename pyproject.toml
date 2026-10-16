@@ -30,7 +30,8 @@ Documentation = "https://bioinfo-recetox.github.io/glassnn/"
 
 [project.optional-dependencies]
 # CuPy 14.2.0 requires numpy<2.6; re-check before widening (PLAN.md, section 2).
-gpu = ["cupy-cuda13x>=14", "numpy<2.6"]
+# [ctk] installs NVRTC and the CUDA headers as wheels, so no system toolkit is needed.
+gpu = ["cupy-cuda13x[ctk]>=14", "numpy<2.6"]
 dev = [
     "pytest>=9",
     "pytest-cov>=7",

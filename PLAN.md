@@ -30,7 +30,7 @@ The single bibliography file `docs/references.bib` is used by Sphinx (`sphinxcon
 
 - **Python >= 3.13.** `.python-version` = 3.13 (the default and the CI version).
 - **NumPy >= 2.5** and **SciPy >= 1.18**: the latest releases compatible with every other requirement (checked on PyPI on 2026-10-02: NumPy 2.5.3, SciPy 1.18.1 requiring `numpy>=2.0,<2.8`, CuPy 14.2.0 requiring `numpy>=2.0,<2.6`). Runtime dependencies: `numpy`, `scipy` only.
-- **GPU option:** CuPy >= 14 as the single optional extra `gpu` (`cupy-cuda13x`, CUDA 13). The extra declares `numpy<2.6` because of CuPy's cap. When NumPy 2.6 appears, re-check CuPy's cap before widening any range.
+- **GPU option:** CuPy >= 14 as the single optional extra `gpu` (`cupy-cuda13x[ctk]`, CUDA 13; decision 40). The extra declares `numpy<2.6` because of CuPy's cap. When NumPy 2.6 appears, re-check CuPy's cap before widening any range.
 - Nothing in the package may import `cupy` unless the user selects that backend.
 - **Clean room:** do **not** copy code from `johnma2006/candle` (it has no license). Karpathy's `micrograd` (MIT) is an acknowledged inspiration; do not copy its code verbatim either. Implement from the literature in section 11. Third-party code, if ever included, needs a compatible license and a notice in `NOTICE`.
 - **License:** MIT. `LICENSE` first line after the title: `Copyright (c) 2026 Vlad Popovici, RECETOX - Faculty of Science, Masaryk University`. `CITATION.cff` lists the same author and affiliation.
@@ -70,8 +70,8 @@ glassnn/
 
 - Module-level `xp` (the active array module), `set_backend("numpy" | "cupy")`, `get_backend()`, `to_numpy(x)`, `asarray(x, dtype=None)`.
 - **Default dtype `float32`**; `set_default_dtype("float64")` for tests and gradient checks. Every layer takes an optional `dtype`.
-- Use only the NumPy/CuPy common subset through `xp`. Special functions (`erf`, `logsumexp`) go through a small adapter: `scipy.special` on CPU, `cupyx.scipy.special` on GPU. Avoid `scipy.signal`; convolutions use `sliding_window_view` plus `tensordot`/`einsum` so they run on both backends.
-- `manual_seed(seed)` creates the global generator (`numpy.random.default_rng` or `cupy.random.default_rng`). Initializers, dropout and `DataLoader` shuffling draw from it, or from an explicit `generator=` argument.
+- Use only the NumPy/CuPy common subset through `xp`. Special functions (`erf`; `logsumexp` is implemented directly) go through a small adapter: `scipy.special` on CPU, `cupyx.scipy.special` on GPU. Avoid `scipy.signal`; convolutions use `sliding_window_view` plus `tensordot`/`einsum` so they run on both backends.
+- `manual_seed(seed)` creates the global generator, a `numpy.random.default_rng` with both backends (decision 41). Initializers, dropout and `DataLoader` shuffling draw from it, or from an explicit `generator=` argument.
 - **RAPIDS note.** RAPIDS (cuDF, cuML) is a data-frame and classical-ML suite; a neural-network library needs only an array library. The "RAPIDS option" is therefore the **CuPy** backend, which RAPIDS libraries interoperate with (zero-copy exchange through DLPack; `to_dlpack`/`from_dlpack` helpers in `backend.py`). No cuDF or cuML dependency. Say this in the book and in the README.
 
 ### 4.2 Autodiff core (`tensor.py`)
@@ -326,5 +326,8 @@ Software
 | 37 | Data of example 08 | `examples/expression.py`: cells on a curved, branching trajectory in a 2-D latent space, about 200 genes as nonlinear (softplus) functions of the latent coordinates, log-normal noise, log-expression |
 | 38 | Tokens in example 07 | main model: overlapping 3-mer tokens plus a CLS token, classification from the CLS output, attention of CLS inspected; single-base tokens shown to fail; a second, hybrid model: `Conv1d` stem + transformer encoder, mean-pooled over positions (no concatenation op needed) |
 | 39 | Slow findings tests | no marker: `tests/test_examples.py` runs locally and in CI with the rest of the suite (owner, 2026-10-04) |
+| 40 | CUDA headers | the `gpu` extra is `cupy-cuda13x[ctk]`: NVRTC and the CUDA headers come as wheels, no system toolkit (owner, 2026-10-15) |
+| 41 | Random numbers on the GPU | always the NumPy generator, also with the CuPy backend; draws are copied to the device, so a seed gives identical results on CPU and GPU. Replaces `cupy.random.default_rng` of section 4.1, whose generator lacks `normal` and `permutation` (owner, 2026-10-15) |
+| 42 | GPU results in the book | GPU cells of chapter 13 are not executed; the benchmark script writes `book/assets/benchmark_backends.json` (hardware, versions, date) and the chapter renders its table (owner, 2026-10-15) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.
