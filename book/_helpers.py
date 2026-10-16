@@ -16,6 +16,8 @@ hence Quarto) renders as Markdown.
 
 import importlib
 import inspect
+import pkgutil
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -128,3 +130,42 @@ def see_also(*names: str) -> Markdown:
     """A "See also" line with API links to ``names``."""
     links = ", ".join(api_link(name).text for name in names)
     return Markdown(f"**See also:** {links}")
+
+
+BOOK_ROLE = re.compile(r":book:`[^`<]*<(chapters/[\w-]+\.html)>`")
+
+
+def api_map() -> dict[str, list[str]]:
+    """Chapter page -> the modules whose docstring links to it.
+
+    The inverse of the ``:book:`` links in the module docstrings (every
+    module has one, see ``tests/test_docstrings.py``), so the map in
+    Appendix B follows the code.
+    """
+    import glassnn  # here, so that importing the helpers stays cheap
+
+    names = [glassnn.__name__]
+    names += [m.name for m in pkgutil.walk_packages(glassnn.__path__, "glassnn.")]
+    chapters: dict[str, list[str]] = {}
+    for name in names:
+        doc = importlib.import_module(name).__doc__ or ""
+        for page in BOOK_ROLE.findall(" ".join(doc.split())):
+            chapters.setdefault(page, []).append(name)
+    return {page: sorted(set(chapters[page])) for page in sorted(chapters)}
+
+
+def chapter_title(page: str) -> str:
+    """The title of a chapter page, read from the first line of its source."""
+    first_line = (REPO_ROOT / "book" / page).with_suffix(".qmd").read_text()
+    return first_line.splitlines()[0].removeprefix("# ").split(" {#")[0]
+
+
+def api_map_table() -> Markdown:
+    """Appendix B: one row per chapter, with links to its modules."""
+    lines = ["| Chapter | Modules |", "|---|---|"]
+    for page, modules in api_map().items():
+        links = ", ".join(f"[`{name}`]({API_URL}{name}.html)" for name in modules)
+        # Appendix B is in chapters/, next to the chapters it links to.
+        title = f"[{chapter_title(page)}]({page.removeprefix('chapters/')})"
+        lines.append(f"| {title} | {links} |")
+    return Markdown("\n".join(lines))

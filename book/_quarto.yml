@@ -31,8 +31,13 @@ book:
         - chapters/11-autoencoders.qmd
     - part: "Toolkits"
       chapters:
+        - chapters/12-pytorch.qmd
         - chapters/13-design-notes.qmd
     - references.qmd
+  appendices:
+    - chapters/a-matrix-calculus.qmd
+    - chapters/b-api-map.qmd
+    - chapters/c-reading-list.qmd
 
 bibliography: ../docs/references.bib
 csl: assets/ieee.csl

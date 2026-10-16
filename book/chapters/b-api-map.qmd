@@ -1,0 +1,20 @@
+# API map: chapters and modules {#sec-api-map}
+
+```{python}
+#| include: false
+from _helpers import api_map_table
+```
+
+Each module of GlassNN names, in its docstring, the chapters that explain
+it. The table inverts these links: for every chapter, the modules it
+covers, each linked to its page in the API reference. It is built from the
+code when the book is rendered, so it is always current.
+
+Chapters 7 (memorization), 11 (autoencoders) and 12 (PyTorch) build on the
+example notebooks and the PyTorch notebooks rather than on a module of
+their own.
+
+```{python}
+#| echo: false
+api_map_table()
+```
