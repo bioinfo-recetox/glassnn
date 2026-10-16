@@ -12,7 +12,8 @@
 ## Commands (using uv)
 
 ```
-uv sync --extra dev --extra docs --extra examples   # create .venv (not --all-extras: the gpu extra needs CUDA)
+uv sync --extra dev --extra docs --extra book --extra examples   # create .venv; uv sync removes every extra not named
+uv sync --extra dev --extra docs --extra book --extra examples --extra gpu   # the same on a machine with an NVIDIA GPU (CUDA 13)
 uv run pytest                 # all tests except torch/gpu markers
 uv pip install torch --index-url https://download.pytorch.org/whl/cpu   # once; `uv sync` removes it again
 uv run pytest -m torch        # cross-checks against PyTorch
