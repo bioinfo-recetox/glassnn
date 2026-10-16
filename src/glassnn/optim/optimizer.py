@@ -1,4 +1,7 @@
-"""The base class of all optimizers."""
+"""The base class of all optimizers.
+
+Book chapter: :book:`Optimization <chapters/05-optimization.html>`.
+"""
 
 from collections.abc import Iterable
 

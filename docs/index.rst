@@ -17,6 +17,7 @@ The package re-exports the most used names: ``glassnn.Tensor`` is
    :maxdepth: 2
    :caption: Modules
 
+   glassnn
    glassnn.tensor
    glassnn.backend
    glassnn.gradcheck

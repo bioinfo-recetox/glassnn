@@ -44,7 +44,9 @@ def gradcheck(
     vector-Jacobian product :math:`w^\top J`, which is exactly what
     :meth:`Tensor.backward` computes. An element passes if
     :math:`|g_{\text{backward}} - g_{\text{numerical}}| \le
-    \text{atol} + \text{rtol}\, |g_{\text{numerical}}|`.
+    \text{atol} + \text{rtol}\, |g_{\text{numerical}}|`. Comparing with
+    central differences is the standard test of a backward pass
+    :cite:p:`goodfellow2016deep`.
 
     Args:
         fn: A function of the tensors in ``inputs`` that returns a Tensor.

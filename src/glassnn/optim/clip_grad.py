@@ -1,4 +1,7 @@
-"""Gradient clipping."""
+"""Gradient clipping.
+
+Book chapter: :book:`Optimization <chapters/05-optimization.html>`.
+"""
 
 import math
 from collections.abc import Iterable
@@ -16,7 +19,7 @@ def clip_grad_norm_(parameters: Tensor | Iterable[Tensor], max_norm: float) -> T
         \frac{\text{max\_norm}}{\lVert g \rVert_2 + 10^{-6}}\right).
 
     The direction of the update is kept; only very large steps (e.g. at the
-    start of training) are shortened.
+    start of training) are shortened :cite:p:`pascanu2013difficulty`.
 
     Args:
         parameters: One tensor or an iterable of tensors; those without a

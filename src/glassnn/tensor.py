@@ -46,6 +46,10 @@ _grad_enabled = True
 class Tensor:
     """A multidimensional array that can record operations for autodiff.
 
+    Operations on tensors build the computational graph that
+    :meth:`backward` traverses in reverse (reverse-mode automatic
+    differentiation, :cite:p:`baydin2018automatic`).
+
     Args:
         data: A scalar, a (nested) list, an array, or another ``Tensor``
             (its values are used; its graph is not).

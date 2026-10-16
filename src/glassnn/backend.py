@@ -56,6 +56,11 @@ def get_backend() -> str:
 
     Returns:
         ``"numpy"`` or ``"cupy"``.
+
+    Example:
+        >>> from glassnn import backend
+        >>> backend.get_backend()
+        'numpy'
     """
     return _backend_name
 
@@ -69,7 +74,8 @@ def set_backend(name: str) -> None:
 
     Args:
         name: ``"numpy"`` (CPU) or ``"cupy"`` (NVIDIA GPU, needs the ``gpu``
-            extra: ``pip install "glassnn[gpu]"``).
+            extra: ``pip install "glassnn[gpu]"``). CuPy implements the NumPy
+            interface on the GPU :cite:p:`okuta2017cupy`.
 
     Raises:
         ImportError: If ``name`` is ``"cupy"`` and CuPy is not installed.
@@ -115,6 +121,11 @@ def get_default_dtype() -> np.dtype:
 
     Returns:
         ``float32`` unless changed with :func:`set_default_dtype`.
+
+    Example:
+        >>> from glassnn import backend
+        >>> str(backend.get_default_dtype())
+        'float32'
     """
     return _default_dtype
 
@@ -130,6 +141,13 @@ def set_default_dtype(dtype: npt.DTypeLike) -> None:
 
     Raises:
         ValueError: If ``dtype`` is neither float32 nor float64.
+
+    Example:
+        >>> from glassnn import Tensor, backend
+        >>> backend.set_default_dtype("float64")
+        >>> str(Tensor([1.0]).dtype)
+        'float64'
+        >>> backend.set_default_dtype("float32")
     """
     global _default_dtype
     requested = np.dtype(dtype)
@@ -195,6 +213,11 @@ def to_numpy(array: Any) -> np.ndarray:
     Returns:
         A ``numpy.ndarray`` with the same values; a NumPy array is returned
         as it is, without a copy.
+
+    Example:
+        >>> from glassnn import Tensor, backend
+        >>> backend.to_numpy(Tensor([1.0, 2.0]).data)
+        array([1., 2.], dtype=float32)
     """
     if _is_cupy_array(array):
         return array.get()
@@ -246,6 +269,12 @@ def to_dlpack(array: Any) -> Any:
 
     References:
         :cite:p:`dlpack`
+
+    Example:
+        >>> import numpy as np
+        >>> from glassnn import backend
+        >>> type(backend.to_dlpack(np.arange(3.0))).__name__
+        'PyCapsule'
     """
     return array.__dlpack__()
 
@@ -284,7 +313,16 @@ def manual_seed(seed: int) -> np.random.Generator:
 
 
 def get_generator() -> np.random.Generator:
-    """Return the global random generator (see :func:`manual_seed`)."""
+    """Return the global random generator (see :func:`manual_seed`).
+
+    Returns:
+        A ``numpy.random.Generator``, with both backends.
+
+    Example:
+        >>> from glassnn import backend
+        >>> backend.manual_seed(0) is backend.get_generator()
+        True
+    """
     return _generator
 
 
@@ -301,5 +339,11 @@ def erf(x: Any) -> Any:
 
     Returns:
         An array of the same shape.
+
+    Example:
+        >>> import numpy as np
+        >>> from glassnn import backend
+        >>> backend.erf(np.array([0.0, 3.0])).round(4)
+        array([0., 1.])
     """
     return _special.erf(x)

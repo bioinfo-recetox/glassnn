@@ -1,4 +1,8 @@
-"""Loss functions as modules (each calls :mod:`glassnn.functional`)."""
+"""Loss functions as modules (each calls :mod:`glassnn.functional`).
+
+Book chapter: :book:`Backpropagation in a multilayer perceptron
+<chapters/03-mlp.html>`.
+"""
 
 from typing import Any
 
@@ -8,7 +12,19 @@ from glassnn.tensor import Tensor
 
 
 class MSELoss(Module):
-    """Mean squared error; see :func:`glassnn.functional.mse_loss`."""
+    r"""Mean squared error, :math:`\ell = \frac1n \sum_i (a_i - y_i)^2`.
+
+    See :func:`glassnn.functional.mse_loss`.
+
+    Args:
+        reduction: ``"mean"`` (the formula), ``"sum"`` (without
+            :math:`\frac1n`) or ``"none"`` (the squared errors).
+
+    Example:
+        >>> from glassnn import Tensor, nn
+        >>> nn.MSELoss()(Tensor([1.0, 3.0]), Tensor([0.0, 0.0]))
+        Tensor(5.)
+    """
 
     def __init__(self, reduction: str = "mean") -> None:
         """Store the reduction (``"mean"``, ``"sum"`` or ``"none"``)."""
@@ -21,7 +37,26 @@ class MSELoss(Module):
 
 
 class CrossEntropyLoss(Module):
-    """Cross-entropy of logits; see :func:`glassnn.functional.cross_entropy`."""
+    r"""Cross-entropy of logits.
+
+    .. math:: \ell_i = -\log \operatorname{softmax}(a_i)_{y_i}
+
+    With label smoothing :math:`\varepsilon` the target puts
+    :math:`1 - \varepsilon + \varepsilon / C` on the true class and
+    :math:`\varepsilon / C` on each of the :math:`C - 1` others
+    :cite:p:`szegedy2016rethinking`. See
+    :func:`glassnn.functional.cross_entropy`.
+
+    Args:
+        reduction: ``"mean"``, ``"sum"`` or ``"none"`` over the examples.
+        label_smoothing: :math:`\varepsilon \in [0, 1]`.
+
+    Example:
+        >>> from glassnn import Tensor, nn
+        >>> loss = nn.CrossEntropyLoss()(Tensor([[0.0, 0.0]]), Tensor([1]))
+        >>> round(loss.item(), 4)
+        0.6931
+    """
 
     def __init__(self, reduction: str = "mean", label_smoothing: float = 0.0) -> None:
         """Store the reduction and the label smoothing."""
@@ -40,9 +75,20 @@ class CrossEntropyLoss(Module):
 
 
 class BCEWithLogitsLoss(Module):
-    """Binary cross-entropy of logits.
+    r"""Binary cross-entropy of logits, computed without overflow.
+
+    .. math:: \ell_i = -y_i \log \sigma(a_i) - (1 - y_i) \log (1 - \sigma(a_i))
 
     See :func:`glassnn.functional.binary_cross_entropy_with_logits`.
+
+    Args:
+        reduction: ``"mean"``, ``"sum"`` or ``"none"``.
+
+    Example:
+        >>> from glassnn import Tensor, nn
+        >>> loss = nn.BCEWithLogitsLoss()(Tensor([0.0]), Tensor([1.0]))
+        >>> round(loss.item(), 4)
+        0.6931
     """
 
     def __init__(self, reduction: str = "mean") -> None:

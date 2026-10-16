@@ -2,6 +2,9 @@
 
 The names follow ``torch.nn``: ``from glassnn import nn`` and then
 ``nn.Linear``, ``nn.Sequential``, ``nn.init.kaiming_uniform_``...
+
+Book chapter: :book:`Backpropagation in a multilayer perceptron
+<chapters/03-mlp.html>`.
 """
 
 from glassnn.nn import init

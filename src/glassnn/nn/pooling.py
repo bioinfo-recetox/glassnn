@@ -54,7 +54,9 @@ class MaxPool1d(Module):
 
 
 class AvgPool1d(MaxPool1d):
-    """Mean over sliding windows; see :func:`glassnn.functional.avg_pool1d`.
+    r"""Mean over sliding windows; see :func:`glassnn.functional.avg_pool1d`.
+
+    .. math:: y_{n,c,i} = \frac1K \sum_{k=0}^{K-1} x_{n,c,\, s i + k}
 
     Args:
         kernel_size: The window length.
@@ -112,7 +114,10 @@ class MaxPool2d(MaxPool1d):
 
 
 class AvgPool2d(MaxPool2d):
-    """Mean over sliding windows of an image.
+    r"""Mean over sliding windows of an image.
+
+    .. math:: y_{n,c,i,j} = \frac{1}{K_H K_W} \sum_{k < K_H} \sum_{l < K_W}
+        x_{n,c,\, s_1 i + k,\, s_2 j + l}
 
     See :func:`glassnn.functional.avg_pool2d`.
 

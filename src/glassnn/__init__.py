@@ -2,6 +2,8 @@
 
 The public API is re-exported here as it is implemented, milestone by
 milestone (see ``PLAN.md``, section 7).
+
+Book chapter: :book:`Introduction <chapters/01-introduction.html>`.
 """
 
 from importlib.metadata import PackageNotFoundError, version
