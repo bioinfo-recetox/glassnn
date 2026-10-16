@@ -29,6 +29,9 @@ book:
         - chapters/09-convolutions.qmd
         - chapters/10-attention.qmd
         - chapters/11-autoencoders.qmd
+    - part: "Toolkits"
+      chapters:
+        - chapters/13-design-notes.qmd
     - references.qmd
 
 bibliography: ../docs/references.bib
