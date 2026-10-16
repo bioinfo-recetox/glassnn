@@ -152,8 +152,12 @@ class TransformerEncoderLayer(Module):
 
 
 class TransformerEncoder(Module):
-    """A stack of ``num_layers`` copies of an encoder layer.
+    r"""A stack of ``num_layers`` copies of an encoder layer.
 
+    .. math:: H_0 = X, \qquad H_\ell = \mathrm{Layer}_\ell(H_{\ell-1}),
+        \qquad Y = \mathrm{norm}(H_{N})
+
+    as in the encoder of :cite:t:`vaswani2017attention`.
     Each layer is a deep copy of ``encoder_layer``, so all layers start with
     the *same* parameter values (as in PyTorch) but are trained separately.
 

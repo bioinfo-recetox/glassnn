@@ -1,4 +1,7 @@
-"""Adam and AdamW."""
+"""Adam and AdamW.
+
+Book chapter: :book:`Optimization <chapters/05-optimization.html>`.
+"""
 
 from collections.abc import Iterable
 
@@ -103,6 +106,15 @@ class AdamW(Adam):
         betas: :math:`(\beta_1, \beta_2)`.
         eps: :math:`\epsilon`.
         weight_decay: :math:`\lambda` (default 0.01, as in PyTorch).
+
+    Example:
+        >>> from glassnn import Tensor, nn, optim
+        >>> p = nn.Parameter([1.0])
+        >>> opt = optim.AdamW([p], lr=0.1, weight_decay=0.5)
+        >>> p.grad = Tensor([0.0])
+        >>> opt.step()  # zero gradient: only the decay acts, 1 - 0.1 * 0.5
+        >>> p
+        Parameter([0.95], requires_grad=True)
     """
 
     decoupled_weight_decay = True

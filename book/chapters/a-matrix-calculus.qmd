@@ -1,0 +1,154 @@
+# Matrix calculus for backpropagation {#sec-matrix-calculus}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import api_link
+```
+
+This appendix collects the backward rules used by GlassNN, in the notation
+of @sec-autodiff. $L$ is a scalar (the loss); for every array $z$ the
+*adjoint* $\bar z = \partial L / \partial z$ has the shape of $z$. A
+backward rule maps the adjoint of an output to the adjoints of the inputs:
+it is a vector-Jacobian product, and it never forms the Jacobian
+[@griewank2008evaluating; @baydin2018automatic]. When an array is used
+several times, its adjoints are added.
+
+The rules are derived by writing the change of $L$,
+$\delta L = \langle \bar z, \delta z \rangle$ (the sum of elementwise
+products), and expressing $\delta z$ through $\delta a$: the factor that
+multiplies $\delta a$ is $\bar a$ [@goodfellow2016deep, chapter 6].
+
+## Shapes: sums, broadcasting, reshaping
+
+| Forward | Backward |
+|---|---|
+| $z = \sum_j a_{ij}$ | $\bar a_{ij} = \bar z_i$ (copy along the summed axis) |
+| $z = \frac1n \sum_j a_{ij}$ | $\bar a_{ij} = \bar z_i / n$ |
+| $z = a + b$, $b$ broadcast along an axis | $\bar a = \bar z$, $\bar b = \sum_\text{axis} \bar z$ |
+| $z = \operatorname{reshape}(a)$, $z = a^\top$, $z = \operatorname{permute}(a)$ | $\bar a = $ the inverse reshape, transpose or permutation of $\bar z$ |
+| $z = a[\text{index}]$ | $\bar a = 0$, then $\bar a[\text{index}] \mathrel{+}= \bar z$ (repeated indices add up) |
+
+Broadcasting copies an array along an axis, so its adjoint *sums* over that
+axis: this is `_unbroadcast` in `glassnn.tensor`. Indexing with repeated
+indices uses `add.at`, which adds instead of overwriting.
+
+## Elementwise operations
+
+| Forward | Backward |
+|---|---|
+| $z = f(a)$ | $\bar a = \bar z \odot f'(a)$ |
+| $z = a \odot b$ | $\bar a = \bar z \odot b$, $\bar b = \bar z \odot a$ |
+| $z = a / b$ | $\bar a = \bar z / b$, $\bar b = -\bar z \odot a / b^2$ |
+| $z = a^p$ | $\bar a = \bar z \odot p\, a^{p-1}$ |
+| $z = \max(a, 0)$ | $\bar a = \bar z \odot [a > 0]$ |
+| $z = \sigma(a)$ | $\bar a = \bar z \odot z \odot (1 - z)$ |
+| $z = \tanh a$ | $\bar a = \bar z \odot (1 - z^2)$ |
+
+The derivative is often cheapest in terms of the *output* $z$, which the
+forward pass keeps.
+
+## Matrix products and linear layers
+
+For $Z = AB$ with $A \in \R^{m \times k}$ and $B \in \R^{k \times n}$,
+$\delta L = \langle \bar Z, \delta A\, B + A\, \delta B \rangle$ gives
+
+$$
+\bar A = \bar Z B^\top, \qquad \bar B = A^\top \bar Z .
+$$ {#eq-app-matmul}
+
+Each adjoint has the shape of its input, which is a useful check. For a
+linear layer on a batch, $Y = X W^\top + \mathbf 1 b^\top$ with
+$X \in \R^{N \times n}$, $W \in \R^{m \times n}$:
+
+$$
+\bar X = \bar Y W, \qquad \bar W = \bar Y^\top X, \qquad
+\bar b = \sum_{i=1}^N \bar Y_{i,:} .
+$$ {#eq-app-linear}
+
+The bias is broadcast over the batch, so its adjoint sums over it.
+
+## Softmax, log-softmax and cross-entropy
+
+For one row, $s = \operatorname{softmax}(a)$ has Jacobian
+$\operatorname{diag}(s) - s s^\top$, hence
+
+$$
+\bar a = s \odot \bigl(\bar s - \langle \bar s, s \rangle\bigr).
+$$
+
+For $z = \log \operatorname{softmax}(a)$, $\bar a = \bar z - s \sum_k \bar z_k$.
+The cross-entropy of a row with true class $y$,
+$\ell = -\log s_y$, combines the two into
+
+$$
+\bar a = \bar \ell\, (s - e_y),
+$$ {#eq-app-ce}
+
+with $e_y$ the one-hot vector of $y$; averaging over a batch of $N$ rows
+divides by $N$. With label smoothing $\varepsilon$, $e_y$ is replaced by
+$(1 - \varepsilon) e_y + \varepsilon / C$.
+
+## Normalization
+
+With $\hat x = (x - \mu) / \sqrt{\sigma^2 + \varepsilon}$, the mean $\mu$
+and the biased variance $\sigma^2$ taken over $m$ elements (a row for
+layer normalization, a feature over the batch for batch normalization),
+
+$$
+\bar x = \frac{1}{\sqrt{\sigma^2 + \varepsilon}} \Bigl(\bar{\hat x}
+- \operatorname{mean}(\bar{\hat x})
+- \hat x \operatorname{mean}(\bar{\hat x} \odot \hat x)\Bigr).
+$$
+
+The two subtracted terms account for $\mu$ and $\sigma$ depending on $x$.
+
+## Convolution and pooling
+
+Im2col rewrites a convolution as a matrix product [@chellapilla2006high]:
+the windows of the input become the columns of a matrix $U$, the filters
+the rows of $W_\text{mat}$, and $Y = W_\text{mat} U$. By
+@eq-app-matmul, $\bar W_\text{mat} = \bar Y U^\top$ and
+$\bar U = W_\text{mat}^\top \bar Y$; since windows overlap, an input element
+appears in several columns of $U$ and its adjoint is the *sum* of the
+corresponding entries of $\bar U$ ("col2im"). Max pooling passes the adjoint
+to the position of the maximum of each window; average pooling spreads it
+evenly over the window.
+
+## Attention
+
+For $S = Q K^\top / \sqrt d$, $A = \operatorname{softmax}(S)$ row by row,
+and $Z = A V$ (@sec-attention):
+
+$$
+\bar V = A^\top \bar Z, \quad \bar A = \bar Z V^\top, \quad
+\bar S = A \odot \bigl(\bar A - \operatorname{rowsum}(\bar A \odot A)\bigr), \quad
+\bar Q = \frac{\bar S K}{\sqrt d}, \quad \bar K = \frac{\bar S^\top Q}{\sqrt d}.
+$$
+
+A mask adds $-\infty$ to some scores; the corresponding weights are 0 and
+receive no gradient.
+
+## Check a rule numerically
+
+Every rule above is tested in GlassNN against central finite differences
+with `{python} api_link("glassnn.gradcheck.gradcheck")`. The same check
+confirms @eq-app-linear for a hand-written layer:
+
+```{python}
+import numpy as np
+
+from glassnn import Tensor
+from glassnn.gradcheck import gradcheck
+
+rng = np.random.default_rng(0)
+X, W, b = (
+    Tensor(rng.normal(size=shape), requires_grad=True, dtype="float64")
+    for shape in [(4, 3), (2, 3), (2,)]
+)
+print(gradcheck(lambda X, W, b: X @ W.T + b, [X, W, b]))
+
+Y_bar = np.cos(np.arange(1, 9)).reshape(4, 2)  # the weights gradcheck uses
+print(np.allclose(W.grad.data, Y_bar.T @ X.data))  # W-bar = Y-bar^T X
+```

@@ -1,5 +1,6 @@
 """Tests of book/_helpers.py, the cross-referencing helpers of the book."""
 
+import re
 import sys
 from pathlib import Path
 
@@ -80,3 +81,28 @@ def test_see_also_lists_api_links():
     markdown = _helpers.see_also("glassnn.Tensor", "glassnn.no_grad")._repr_markdown_()
     assert markdown.startswith("**See also:** [`glassnn.Tensor`](")
     assert "[`glassnn.no_grad`](" in markdown
+
+
+def test_api_map_inverts_the_book_links_of_the_modules():
+    chapters = _helpers.api_map()
+    # Every module docstring links to at least one chapter (tests/test_docstrings).
+    listed = {module for modules in chapters.values() for module in modules}
+    assert "glassnn.tensor" in chapters["chapters/02-autodiff.html"]
+    assert "glassnn.backend" in chapters["chapters/13-design-notes.html"]
+    assert {"glassnn.optim.adam", "glassnn.nn.linear"} <= listed
+    assert list(chapters) == sorted(chapters)
+
+
+def test_api_map_table_links_every_module():
+    table = _helpers.api_map_table().text
+    for modules in _helpers.api_map().values():
+        for module in modules:
+            assert f"[`{module}`]({_helpers.API_URL}{module}.html)" in table
+
+
+def test_the_reading_list_cites_every_bibliography_entry():
+    bib = (REPO_ROOT / "docs" / "references.bib").read_text()
+    keys = re.findall(r"^@\w+\{([^,]+),", bib, flags=re.MULTILINE)
+    reading_list = (REPO_ROOT / "book" / "chapters" / "c-reading-list.qmd").read_text()
+    missing = [key for key in keys if f"@{key}" not in reading_list]
+    assert not missing, missing

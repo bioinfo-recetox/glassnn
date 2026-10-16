@@ -1,0 +1,249 @@
+# From GlassNN to PyTorch {#sec-pytorch}
+
+{{< include ../_macros.qmd >}}
+
+```{python}
+#| include: false
+from _helpers import Markdown, api_link, see_also, show_source
+from _rosetta import markdown_table
+```
+
+## Goals
+
+- Translate a GlassNN model and training loop into PyTorch, almost line by
+  line.
+- Know where the two libraries differ: the Rosetta table.
+- Run the PyTorch versions of examples 02 and 06 on Google Colab.
+
+## Theory
+
+### The same four ideas
+
+GlassNN was written so that its names are PyTorch's names
+[@paszke2019pytorch]. Both libraries rest on the same four ideas, and a
+GlassNN program becomes a PyTorch program by changing the imports:
+
+1. **A tensor that records its history.** `Tensor(data, requires_grad=True)`
+   in GlassNN, `torch.tensor(data, requires_grad=True)` in PyTorch. Every
+   operation adds a node to a graph, and `loss.backward()` runs reverse-mode
+   differentiation through it (@sec-autodiff). Both accumulate into
+   `.grad`, so both need `zero_grad()`.
+2. **A module that owns parameters.** `nn.Module`, `nn.Parameter`,
+   `forward`, `parameters()`, `state_dict()`, `train()` and `eval()` have
+   the same names and roles.
+3. **An optimizer that reads `.grad`.** `optim.SGD`, `Adam`, `AdamW` and
+   `RMSprop` take the same arguments (`lr`, `betas`, `eps`,
+   `weight_decay`, `momentum`) and implement the same update formulas
+   (@sec-optimization); the cross-checks of the test suite compare the
+   steps.
+4. **The same defaults where they matter.** `nn.Linear` and `nn.Conv1d`
+   start from PyTorch's initialization
+   $U\bigl[-1/\sqrt{n_\text{in}}, 1/\sqrt{n_\text{in}}\bigr]$, float32 is
+   the default dtype, and `LayerNorm` and `BatchNorm1d` use the same
+   $\varepsilon$.
+
+A training step therefore reads the same in both:
+
+$$
+\theta \leftarrow \theta - \eta\, \nabla_\theta \frac1B \sum_{i \in
+\text{batch}} \ell\bigl(f_\theta(x_i), y_i\bigr),
+$$ {#eq-pytorch-step}
+
+with `optimizer.zero_grad()`, `loss.backward()` and `optimizer.step()`
+playing the same parts.
+
+### What PyTorch adds
+
+PyTorch is built for models a thousand times larger than those of the
+lectures, and that shows in four places:
+
+- **Devices.** Every tensor lives on a device (`x.to("cuda")`); GlassNN
+  switches the whole library at once (@sec-design).
+- **Data pipelines.** `torch.utils.data` separates a `Dataset` (how to get
+  example $i$) from a `DataLoader` (batching, shuffling, worker
+  processes); GlassNN's `DataLoader` takes the arrays.
+- **Inspection by hooks.** Instead of helpers such as
+  `analysis.activation_stats`, PyTorch lets you attach a *forward hook* to
+  any module; notebook A shows how.
+- **Speed.** Fused kernels, `torch.compile`, mixed precision and
+  distributed training. None of it changes the mathematics of the earlier
+  chapters.
+
+### Why the numbers still differ
+
+The same seed gives different random numbers in the two libraries
+(`numpy.random.Generator` against `torch.Generator`), so two runs start
+from different weights and follow different paths. The *findings* of the
+example notebooks are robust to this; the individual numbers are not. To
+compare the libraries exactly, copy the weights, as the cross-check tests
+do (Exercise 12.1).
+
+## Where in the code
+
+::: {.callout-note title="Where in the code"}
+The PyTorch notebooks are in `examples/colab_pytorch/`: notebook A
+(initialization and depth, the counterpart of example 02) and notebook B
+(the CNN on DNA, the counterpart of example 06). Each ends with the Rosetta
+table below.
+
+The table itself is one data file, `book/assets/rosetta.toml`. This
+chapter renders it,
+`examples/colab_pytorch/_sync_rosetta.py` copies it into the notebooks, and
+a test fails if a docstring with a "Differences from PyTorch" note has no
+row, or if a notebook holds an outdated copy.
+
+The GlassNN layer whose PyTorch counterpart is compared most often,
+`{python} api_link("glassnn.nn.Linear")`:
+
+```{python}
+#| echo: false
+show_source("glassnn.nn.Linear.forward")
+```
+
+`{python} see_also("glassnn.nn.Module", "glassnn.optim.Adam", "glassnn.data.DataLoader")`
+:::
+
+### The Rosetta table
+
+Everything not listed has the same name, arguments and meaning in both
+libraries.
+
+```{python}
+#| echo: false
+Markdown(markdown_table())
+```
+
+## Try it
+
+### One model, two libraries
+
+A small classifier trained on two moons with GlassNN:
+
+```{python}
+import numpy as np
+from sklearn.datasets import make_moons
+
+import glassnn.functional as F
+from glassnn import Tensor, manual_seed, nn, optim
+from glassnn.data import DataLoader
+
+X, y = make_moons(n_samples=512, noise=0.2, random_state=0)
+manual_seed(0)
+model = nn.Sequential(nn.Linear(2, 32), nn.ReLU(), nn.Linear(32, 2))
+optimizer = optim.Adam(model.parameters(), lr=0.01)
+for epoch in range(20):
+    for xb, yb in DataLoader(X, y, batch_size=32, shuffle=True):
+        optimizer.zero_grad()
+        loss = F.cross_entropy(model(xb), yb)
+        loss.backward()
+        optimizer.step()
+accuracy = (model(Tensor(X)).data.argmax(axis=1) == y).mean()
+print(f"GlassNN: training accuracy {accuracy:.3f}")
+```
+
+The same program in PyTorch. It is not executed when the book is built
+(the build does not install PyTorch); on Colab it runs as it is. Apart
+from the imports, three lines change: the arrays become tensors, the data
+are wrapped in a `TensorDataset`, and the seed is set with
+`torch.manual_seed`.
+
+```{python}
+#| eval: false
+import torch
+import torch.nn.functional as F
+from torch import nn, optim
+from torch.utils.data import DataLoader, TensorDataset
+
+X_t = torch.tensor(X, dtype=torch.float32)
+y_t = torch.tensor(y)
+torch.manual_seed(0)
+model = nn.Sequential(nn.Linear(2, 32), nn.ReLU(), nn.Linear(32, 2))
+optimizer = optim.Adam(model.parameters(), lr=0.01)
+for epoch in range(20):
+    for xb, yb in DataLoader(TensorDataset(X_t, y_t), batch_size=32, shuffle=True):
+        optimizer.zero_grad()
+        loss = F.cross_entropy(model(xb), yb)
+        loss.backward()
+        optimizer.step()
+accuracy = (model(X_t).argmax(dim=1) == y_t).float().mean()
+print(f"PyTorch: training accuracy {accuracy:.3f}")
+```
+
+### The Colab notebooks
+
+Open them directly on Colab:
+
+- [A: initialization and depth](https://colab.research.google.com/github/bioinfo-recetox/glassnn/blob/main/examples/colab_pytorch/A_mlp_init.ipynb)
+- [B: a 1-D CNN finds a DNA motif](https://colab.research.google.com/github/bioinfo-recetox/glassnn/blob/main/examples/colab_pytorch/B_cnn_motif.ipynb)
+
+## Exercises
+
+::: {.callout-tip title="Exercise 12.1: a GlassNN state_dict in PyTorch"}
+`nn.Linear` has the same parameter names (`weight`, `bias`) and shapes in
+both libraries. Write a function that copies the weights of the GlassNN MLP
+above into the PyTorch MLP, and check that both give the same logits.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+With `model_glassnn` the GlassNN model and `model_torch` the PyTorch one:
+GlassNN's `state_dict` holds arrays, PyTorch's `load_state_dict` wants
+tensors with the same keys (`"0.weight"`, `"0.bias"`, `"2.weight"`, ...):
+
+```{python}
+#| eval: false
+state = {key: torch.tensor(value) for key, value in model_glassnn.state_dict().items()}
+model_torch.load_state_dict(state)
+with torch.no_grad():
+    difference = model_torch(X_t).numpy() - model_glassnn(Tensor(X)).data
+print(abs(difference).max())  # about 1e-6 in float32
+```
+
+For other layers, compare the keys first. `BatchNorm1d` has no
+`num_batches_tracked` buffer, so load with `strict=False`; for
+`MultiheadAttention` the three projections must be stacked into PyTorch's
+`in_proj_weight`.
+:::
+
+::: {.callout-tip title="Exercise 12.2: same seed, different weights"}
+`manual_seed(0)` in GlassNN and `torch.manual_seed(0)` in PyTorch, followed
+by `nn.Linear(2, 32)`, give different weights. Why? Why do the two
+libraries nevertheless agree on the *distribution* of the weights?
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The two seeds feed different generators (NumPy's PCG64 and PyTorch's
+Mersenne Twister) that turn the seed into different streams of numbers.
+Both layers then draw from the same distribution,
+$U[-1/\sqrt{n_\text{in}}, 1/\sqrt{n_\text{in}}]$, so means, variances and
+everything that depends only on them (chapter 4) agree:
+
+```{python}
+manual_seed(0)
+w = nn.Linear(200, 400).weight.data
+print(w.min().round(4), w.max().round(4), "bound", round(1 / np.sqrt(200), 4))
+```
+:::
+
+::: {.callout-tip title="Exercise 12.3: a difference that bites"}
+Pick a row of the Rosetta table that would change a *result* rather than
+raise an error when code is moved from GlassNN to PyTorch, and give an
+example.
+:::
+
+::: {.callout-tip title="Solution" collapse="true"}
+The boolean mask of `F.scaled_dot_product_attention`: in GlassNN `True`
+forbids attention, in PyTorch's function `True` allows it. The same mask
+therefore lets each query see exactly the keys it should *not* see, and
+the code runs without any error. `nn.MultiheadAttention` uses the GlassNN
+convention in both libraries, which is why GlassNN chose it everywhere.
+Another one: `TransformerEncoderLayer` without arguments is pre-LN with GELU
+in GlassNN and post-LN with ReLU in PyTorch.
+:::
+
+## Notes and references
+
+- This chapter supports lecture 11 of *Advanced Machine Learning*.
+- PyTorch: @paszke2019pytorch. Its documentation lists the arguments that
+  GlassNN leaves out.
+- The test suite compares GlassNN with PyTorch layer by layer
+  (`tests/test_torch_crosscheck.py`, marker `torch`).

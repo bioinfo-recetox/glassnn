@@ -52,6 +52,13 @@ def calculate_gain(nonlinearity: str, param: float | None = None) -> float:
     ``"leaky_relu"`` with slope :math:`\alpha` (``param``, default 0.01):
     :math:`\sqrt{2 / (1 + \alpha^2)}`. The values are PyTorch's.
 
+    Args:
+        nonlinearity: The name of the nonlinearity, as listed above.
+        param: The negative slope :math:`\alpha` for ``"leaky_relu"``.
+
+    Returns:
+        The gain :math:`g`.
+
     Raises:
         ValueError: For an unknown nonlinearity.
 
@@ -94,24 +101,88 @@ def _fill(tensor: Tensor, values: Any) -> Tensor:
 def uniform_(
     tensor: Tensor, a: float = 0.0, b: float = 1.0, generator: Any = None
 ) -> Tensor:
-    """Fill with values drawn uniformly from :math:`[a, b)`."""
+    r"""Fill with values drawn uniformly from :math:`[a, b)`.
+
+    Args:
+        tensor: Any shape.
+        a: The lower bound.
+        b: The upper bound.
+        generator: A NumPy generator; ``None`` uses the global one
+            (:func:`glassnn.manual_seed`).
+
+    Returns:
+        ``tensor``, with its values replaced.
+
+    Example:
+        >>> from glassnn import manual_seed, nn
+        >>> from glassnn.nn import init
+        >>> _ = manual_seed(0)
+        >>> w = init.uniform_(nn.Parameter([0.0] * 1000), -1.0, 1.0)
+        >>> bool(w.data.min() >= -1 and w.data.max() < 1)
+        True
+    """
     return _fill(tensor, _generator(generator).uniform(a, b, size=tensor.shape))
 
 
 def normal_(
     tensor: Tensor, mean: float = 0.0, std: float = 1.0, generator: Any = None
 ) -> Tensor:
-    r"""Fill with values drawn from :math:`\mathcal N(\text{mean}, \text{std}^2)`."""
+    r"""Fill with values drawn from :math:`\mathcal N(\text{mean}, \text{std}^2)`.
+
+    Args:
+        tensor: Any shape.
+        mean: The mean.
+        std: The standard deviation.
+        generator: A NumPy generator; ``None`` uses the global one
+            (:func:`glassnn.manual_seed`).
+
+    Returns:
+        ``tensor``, with its values replaced.
+
+    Example:
+        >>> from glassnn import manual_seed, nn
+        >>> from glassnn.nn import init
+        >>> _ = manual_seed(0)
+        >>> w = init.normal_(nn.Parameter([0.0] * 10000), mean=2.0, std=0.5)
+        >>> round(float(w.data.mean()), 1), round(float(w.data.std()), 1)
+        (2.0, 0.5)
+    """
     return _fill(tensor, _generator(generator).normal(mean, std, size=tensor.shape))
 
 
 def zeros_(tensor: Tensor) -> Tensor:
-    """Fill with zeros."""
+    r"""Fill with zeros.
+
+    Args:
+        tensor: Any shape.
+
+    Returns:
+        ``tensor``, with its values replaced.
+
+    Example:
+        >>> from glassnn import nn
+        >>> from glassnn.nn import init
+        >>> init.zeros_(nn.Parameter([1.0, 2.0]))
+        Parameter([0., 0.], requires_grad=True)
+    """
     return _fill(tensor, backend.xp.zeros(tensor.shape))
 
 
 def ones_(tensor: Tensor) -> Tensor:
-    """Fill with ones."""
+    r"""Fill with ones.
+
+    Args:
+        tensor: Any shape.
+
+    Returns:
+        ``tensor``, with its values replaced.
+
+    Example:
+        >>> from glassnn import nn
+        >>> from glassnn.nn import init
+        >>> init.ones_(nn.Parameter([0.0, 2.0]))
+        Parameter([1., 1.], requires_grad=True)
+    """
     return _fill(tensor, backend.xp.ones(tensor.shape))
 
 
@@ -120,6 +191,18 @@ def xavier_uniform_(tensor: Tensor, gain: float = 1.0, generator: Any = None) ->
 
     .. math:: w \sim U[-b, b], \qquad
         b = g \sqrt{\frac{6}{n_\text{in} + n_\text{out}}}
+
+    Args:
+        tensor: A weight of shape ``(out, in, *kernel)``.
+        gain: The gain :math:`g` (see :func:`calculate_gain`).
+        generator: A NumPy generator; ``None`` uses the global one
+            (:func:`glassnn.manual_seed`).
+
+    Returns:
+        ``tensor``, with its values replaced.
+
+    Raises:
+        ValueError: If ``tensor`` has fewer than 2 dimensions.
 
     Example:
         >>> from glassnn import nn
@@ -138,6 +221,26 @@ def xavier_normal_(tensor: Tensor, gain: float = 1.0, generator: Any = None) -> 
 
     .. math:: w \sim \mathcal N(0, \sigma^2), \qquad
         \sigma = g \sqrt{\frac{2}{n_\text{in} + n_\text{out}}}
+
+    Args:
+        tensor: A weight of shape ``(out, in, *kernel)``.
+        gain: The gain :math:`g` (see :func:`calculate_gain`).
+        generator: A NumPy generator; ``None`` uses the global one
+            (:func:`glassnn.manual_seed`).
+
+    Returns:
+        ``tensor``, with its values replaced.
+
+    Raises:
+        ValueError: If ``tensor`` has fewer than 2 dimensions.
+
+    Example:
+        >>> from glassnn import manual_seed, nn
+        >>> from glassnn.nn import init
+        >>> _ = manual_seed(0)
+        >>> w = init.xavier_normal_(nn.Parameter([[0.0] * 200] * 200))
+        >>> round(float(w.data.std()), 2)  # sqrt(2 / 400)
+        0.07
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / (fan_in + fan_out))
@@ -166,6 +269,18 @@ def kaiming_uniform_(
     with :math:`n` the fan-in or fan-out (``mode``) and :math:`g` the gain of
     ``nonlinearity`` (``a`` is the negative slope for ``"leaky_relu"``).
 
+    Args:
+        tensor: A weight of shape ``(out, in, *kernel)``.
+        a: The negative slope, for ``nonlinearity="leaky_relu"``.
+        mode: ``"fan_in"`` (keeps the forward signal) or ``"fan_out"``
+            (keeps the backward signal).
+        nonlinearity: See :func:`calculate_gain`.
+        generator: A NumPy generator; ``None`` uses the global one
+            (:func:`glassnn.manual_seed`).
+
+    Returns:
+        ``tensor``, with its values replaced.
+
     Note:
         ``kaiming_uniform_(w, a=math.sqrt(5))`` gives :math:`g = \sqrt{1/3}`
         and hence :math:`b = 1 / \sqrt{n_\text{in}}`: the default of
@@ -173,6 +288,14 @@ def kaiming_uniform_(
 
     Raises:
         ValueError: For an unknown ``mode`` or ``nonlinearity``.
+
+    Example:
+        >>> from glassnn import nn
+        >>> from glassnn.nn import init
+        >>> w = nn.Parameter([[0.0] * 6] * 4)
+        >>> w = init.kaiming_uniform_(w, nonlinearity="relu")
+        >>> bool(abs(w.data).max() <= 1.0)  # b = sqrt(2) * sqrt(3 / 6) = 1
+        True
     """
     bound = math.sqrt(3.0) * _kaiming_std(tensor, a, mode, nonlinearity)
     return uniform_(tensor, -bound, bound, generator)
@@ -189,8 +312,30 @@ def kaiming_normal_(
 
     .. math:: w \sim \mathcal N(0, \sigma^2), \qquad \sigma = \frac{g}{\sqrt n}
 
+    with :math:`n` and :math:`g` as in :func:`kaiming_uniform_`.
+
+    Args:
+        tensor: A weight of shape ``(out, in, *kernel)``.
+        a: The negative slope, for ``nonlinearity="leaky_relu"``.
+        mode: ``"fan_in"`` or ``"fan_out"``.
+        nonlinearity: See :func:`calculate_gain`.
+        generator: A NumPy generator; ``None`` uses the global one
+            (:func:`glassnn.manual_seed`).
+
+    Returns:
+        ``tensor``, with its values replaced.
+
     Raises:
         ValueError: For an unknown ``mode`` or ``nonlinearity``.
+
+    Example:
+        >>> from glassnn import manual_seed, nn
+        >>> from glassnn.nn import init
+        >>> _ = manual_seed(0)
+        >>> w = nn.Parameter([[0.0] * 50] * 400)
+        >>> w = init.kaiming_normal_(w, nonlinearity="relu")
+        >>> round(float(w.data.std()), 2)  # sqrt(2 / 50)
+        0.2
     """
     std = _kaiming_std(tensor, a, mode, nonlinearity)
     return normal_(tensor, 0.0, std, generator)

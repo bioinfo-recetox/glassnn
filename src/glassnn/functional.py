@@ -63,6 +63,12 @@ def relu(input: Tensor) -> Tensor:
 
     The derivative at :math:`a = 0` is taken as 0, as in PyTorch.
 
+    Args:
+        input: Any shape.
+
+    Returns:
+        The same shape as ``input``.
+
     Example:
         >>> import glassnn.functional as F
         >>> from glassnn import Tensor
@@ -86,6 +92,9 @@ def leaky_relu(input: Tensor, negative_slope: float = 0.01) -> Tensor:
         input: Any shape.
         negative_slope: The slope :math:`\alpha` for negative inputs.
 
+    Returns:
+        The same shape as ``input``.
+
     Example:
         >>> import glassnn.functional as F
         >>> from glassnn import Tensor
@@ -101,6 +110,18 @@ def tanh(input: Tensor) -> Tensor:
     r"""Hyperbolic tangent, elementwise.
 
     .. math:: z = \tanh a, \qquad \bar a = \bar z \odot (1 - z^2)
+
+    Args:
+        input: Any shape.
+
+    Returns:
+        The same shape as ``input``.
+
+    Example:
+        >>> import glassnn.functional as F
+        >>> from glassnn import Tensor
+        >>> F.tanh(Tensor([0.0]))
+        Tensor([0.])
     """
     out = backend.xp.tanh(input.data)
     return _result(out, (input,), lambda grad: (grad * (1 - out**2),), "tanh")
@@ -121,6 +142,12 @@ def sigmoid(input: Tensor) -> Tensor:
 
     .. math:: z = \sigma(a) = \frac{1}{1 + e^{-a}},
         \qquad \bar a = \bar z \odot z \odot (1 - z)
+
+    Args:
+        input: Any shape.
+
+    Returns:
+        The same shape as ``input``.
 
     Example:
         >>> import glassnn.functional as F
@@ -146,6 +173,9 @@ def softplus(input: Tensor, beta: float = 1.0, threshold: float = 20.0) -> Tenso
         input: Any shape.
         beta: The sharpness :math:`\beta`.
         threshold: Above this value of :math:`\beta a` the output is ``a``.
+
+    Returns:
+        The same shape as ``input``.
 
     Example:
         >>> import glassnn.functional as F
@@ -180,6 +210,9 @@ def gelu(input: Tensor, approximate: str = "none") -> Tensor:
     Args:
         input: Any shape.
         approximate: ``"none"`` (exact) or ``"tanh"``.
+
+    Returns:
+        The same shape as ``input``.
 
     Raises:
         ValueError: For another value of ``approximate``.
@@ -229,12 +262,16 @@ def logsumexp(input: Tensor, dim: int, keepdim: bool = False) -> Tensor:
         \qquad \bar a_j = \bar z\, e^{a_j - z} = \bar z \operatorname{softmax}(a)_j .
 
     Subtracting :math:`m` changes nothing mathematically, but makes the
-    largest exponent :math:`e^0 = 1`, so nothing overflows.
+    largest exponent :math:`e^0 = 1`, so nothing overflows
+    :cite:p:`blanchard2021accurately`.
 
     Args:
         input: Any shape.
         dim: The dimension to reduce.
         keepdim: Whether to keep ``dim`` with size 1.
+
+    Returns:
+        The shape of ``input`` without ``dim`` (with size 1 if ``keepdim``).
 
     Example:
         >>> import glassnn.functional as F
@@ -268,6 +305,9 @@ def softmax(input: Tensor, dim: int) -> Tensor:
         input: Any shape.
         dim: The dimension along which the values sum to 1.
 
+    Returns:
+        The same shape as ``input``.
+
     Example:
         >>> import glassnn.functional as F
         >>> from glassnn import Tensor
@@ -292,11 +332,14 @@ def log_softmax(input: Tensor, dim: int) -> Tensor:
         \qquad \bar a_j = \bar z_j - \operatorname{softmax}(a)_j \sum_k \bar z_k
 
     Computing ``log(softmax(a))`` instead would give :math:`\ln 0 = -\infty`
-    for very negative logits.
+    for very negative logits :cite:p:`blanchard2021accurately`.
 
     Args:
         input: Any shape.
         dim: The dimension of the classes.
+
+    Returns:
+        The same shape as ``input``.
 
     Example:
         >>> import glassnn.functional as F
@@ -698,8 +741,9 @@ def conv2d(
     .. math:: y_{n,o,i,j} = b_o + \sum_{c} \sum_{k,l}
         w_{o,c,k,l}\, x_{n,c,\, s_1 i + d_1 k,\, s_2 j + d_2 l}
 
-    The same computation as :func:`conv1d` with two spatial dimensions; the
-    backward pass has the same three formulas, summed over both.
+    The same computation as :func:`conv1d` with two spatial dimensions,
+    implemented with im2col :cite:p:`chellapilla2006high`; the backward pass
+    has the same three formulas, summed over both.
 
     Args:
         input: Shape ``(N, C_in, H, W)``.
@@ -774,6 +818,9 @@ def max_pool2d(
 ) -> Tensor:
     r"""Maximum over sliding windows of an image; see :func:`max_pool1d`.
 
+    .. math:: y_{n,c,i,j} = \max_{0 \le k < K_H,\; 0 \le l < K_W}
+        x_{n,c,\, s_1 i + k,\, s_2 j + l}
+
     Args:
         input: Shape ``(N, C, H, W)``.
         kernel_size: An ``int`` or a pair.
@@ -832,6 +879,9 @@ def avg_pool2d(
     padding: int | tuple[int, int] = 0,
 ) -> Tensor:
     r"""Mean over sliding windows of an image; see :func:`avg_pool1d`.
+
+    .. math:: y_{n,c,i,j} = \frac{1}{K_H K_W} \sum_{k < K_H} \sum_{l < K_W}
+        x_{n,c,\, s_1 i + k,\, s_2 j + l}
 
     Args:
         input: Shape ``(N, C, H, W)``.
@@ -1333,6 +1383,9 @@ def binary_cross_entropy_with_logits(
         target: Targets in :math:`[0, 1]`, the same shape.
         reduction: ``"mean"``, ``"sum"`` or ``"none"``.
 
+    Returns:
+        A scalar, or the shape of ``input`` for ``reduction="none"``.
+
     Raises:
         ValueError: If the shapes differ (the message names both).
 
@@ -1364,6 +1417,9 @@ def mse_loss(input: Tensor, target: Any, reduction: str = "mean") -> Tensor:
         input: Any shape.
         target: The same shape.
         reduction: ``"mean"``, ``"sum"`` or ``"none"``.
+
+    Returns:
+        A scalar, or the shape of ``input`` for ``reduction="none"``.
 
     Raises:
         ValueError: If the shapes differ (the message names both).
