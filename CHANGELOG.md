@@ -7,6 +7,14 @@ annotated git tags.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-19
+
+### Highlights
+
+- A documentation release: the book now opens with a guide to its parts,
+  chapter sections, appendices and notebooks. The library is unchanged
+  from 0.1.0.
+
 ### Changed
 
 - Book: the preface has a "How to read this book" guide (parts, chapter
@@ -271,5 +279,6 @@ Features deliberately kept out of scope (see `PLAN.md`, section 10):
   deferred because it needs `transformers`, a model download and a verified
   model name, and cannot run in CI (decision 45).
 
-[Unreleased]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bioinfo-recetox/glassnn/releases/tag/v0.1.0

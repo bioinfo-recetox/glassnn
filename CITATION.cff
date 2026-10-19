@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use GlassNN in teaching or research, please cite it as below."
 title: "GlassNN: a transparent teaching library for neural networks"
 type: software
-version: "0.1.0"
+version: "0.1.1"
 date-released: "2026-10-19"
 abstract: >-
   GlassNN is a small neural-network library for teaching, written to be
