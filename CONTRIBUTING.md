@@ -41,6 +41,20 @@ fails until then, and also when a docstring gains a "Differences from
 PyTorch" note without a row in the table. The Colab notebooks are executed by
 `uv run pytest -m torch` (needs the `examples` extra).
 
+## Releasing
+
+1. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`
+   (the tagging day), start with a short `### Highlights` list, add an empty
+   `## [Unreleased]` above it and update the comparison links at the bottom.
+2. Set `version` and `date-released` in `CITATION.cff`, and the pinned tag in
+   `README.md`, book chapter 1 and Colab notebook B.
+3. Update `VERSION` in `tests/test_release.py` and run the checks above;
+   `tests/test_release.py` fails while any of these disagree.
+4. After the pull request is merged: `git tag -a vX.Y.Z -m "GlassNN X.Y.Z"`
+   on `main` and `git push origin vX.Y.Z`. The `release.yml` workflow runs the
+   tests, builds the sdist and the wheel, and creates the GitHub Release with
+   the changelog section as notes.
+
 ## Rules
 
 - Write the test first, then the implementation.

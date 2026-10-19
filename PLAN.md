@@ -333,5 +333,9 @@ Software
 | 44 | Data of Colab notebook B | downloaded from GitHub at the pinned tag (`dna_motifs.py`); CI runs the notebook in `examples/`, where the file exists (owner, 2026-10-16) |
 | 45 | Colab notebook C | deferred to the CHANGELOG "Later" list (owner, 2026-10-16) |
 | 46 | Complete API reference | by kind: every public symbol has summary, `Args`, `Returns`, example; math for operations, layers, losses, initializers, optimizers, schedulers; references where literature exists; exemptions listed in `tests/test_docstrings.py` (owner, 2026-10-16) |
+| 47 | Release date | the day the owner tags; `CHANGELOG.md` and `CITATION.cff` carry it, `tests/test_release.py` keeps them equal (owner, 2026-10-16) |
+| 48 | Citation metadata | name and affiliation, no ORCID (owner, 2026-10-16) |
+| 49 | Classifier of 0.1.0 | `Development Status :: 3 - Alpha` (owner, 2026-10-16) |
+| 50 | Release notes | the 0.1.0 section opens with a short "Highlights" list, followed by the detailed list kept since M0 (owner, 2026-10-16) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.
