@@ -97,7 +97,7 @@ GlassNN needs Python 3.13 or newer and depends only on NumPy and SciPy.
 Install a tagged release directly from GitHub:
 
 ```
-pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.1"
+pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.2"
 ```
 
 ### Google Colab
@@ -105,7 +105,7 @@ pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.1"
 In the first cell of a notebook:
 
 ```
-%pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.1"
+%pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.2"
 ```
 
 GlassNN needs NumPy 2.5 or newer. If the NumPy preinstalled on Colab is

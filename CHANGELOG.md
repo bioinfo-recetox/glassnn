@@ -7,6 +7,16 @@ annotated git tags.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-19
+
+### Highlights
+
+- A new optional Colab notebook C: embeddings of the pretrained protein
+  language model ESM-2, fed to a linear classifier, beat the amino-acid
+  composition on telling nuclear from cytoplasmic proteins.
+- Installation on Google Colab is documented in the README and in book
+  chapter 1. The library is unchanged from 0.1.1.
+
 ### Added
 
 - Colab notebook C (`examples/colab_pytorch/C_protein_embeddings.ipynb`):
@@ -292,6 +302,7 @@ The complete table is in chapter 12 of the book (`book/assets/rosetta.toml`).
 Features deliberately kept out of scope (see `PLAN.md`, section 10): none
 at the moment.
 
-[Unreleased]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bioinfo-recetox/glassnn/releases/tag/v0.1.0
