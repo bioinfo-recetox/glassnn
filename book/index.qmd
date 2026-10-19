@@ -11,10 +11,34 @@ and representations) of the course *Advanced Machine Learning*.
 The API reference is published alongside this book, under
 [`api/`](api/index.html).
 
-::: {.callout-note}
-The book is under construction. Chapters are added milestone by milestone,
-together with the code they describe.
-:::
+## How to read this book
+
+The chapters follow the lectures, in four parts:
+
+- **Foundations** (chapters 1 to 5): tensors and automatic differentiation,
+  backpropagation in a multilayer perceptron, initialization, and the
+  optimizers.
+- **Generalization** (chapters 6 to 8): regularization and normalization,
+  memorization and double descent, and the neural tangent kernel.
+- **Architectures** (chapters 9 to 11): convolutions for sequences,
+  attention and the transformer encoder, and autoencoders.
+- **Toolkits** (chapters 12 and 13): moving from GlassNN to PyTorch, and the
+  design of the library, including its optional GPU backend.
+
+Each chapter has the same sections: *Goals*, *Theory* (the derivations),
+*Where in the code* (the actual source of the functions that implement the
+theory, with links to the API reference), *Try it* (runnable code),
+*Exercises* with solutions, and *Notes and references*.
+
+Three appendices follow the chapters:
+
+- @sec-matrix-calculus: the backward rules used by the library;
+- @sec-api-map: which modules each chapter covers;
+- @sec-reading-list: every cited work, by topic.
+
+The example notebooks in the `examples/` folder of the repository
+accompany the chapters, and two of them also exist in PyTorch, for Google
+Colab; see @sec-pytorch. For installation, see @sec-introduction.
 
 This copy of the book was built with:
 

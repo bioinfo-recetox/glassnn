@@ -22,7 +22,9 @@ A neural-network library does three jobs:
 
 1. it stores numbers in multidimensional arrays (*tensors*) and computes with them;
 2. it computes derivatives of those computations automatically (@sec-autodiff);
-3. it provides building blocks: layers, losses and optimizers (later chapters).
+3. it provides building blocks: layers and losses (@sec-mlp, @sec-convolutions,
+   @sec-attention), initializers (@sec-initialization) and optimizers
+   (@sec-optimization).
 
 Production libraries such as PyTorch do these jobs in compiled code, tuned for
 speed. GlassNN does them in a few thousand lines of plain Python on top of
@@ -43,9 +45,9 @@ compiled NumPy code, which is orders of magnitude faster than a Python loop
 over the elements.
 
 GlassNN never calls NumPy directly. It calls `backend.xp`, the *active array
-module*. Today that is always NumPy. Because CuPy implements the same API on
-NVIDIA GPUs, switching `backend.xp` to CuPy runs the same code on a GPU; this
-optional backend is the subject of a later chapter.
+module*, which is NumPy by default. Because CuPy implements the same API on
+NVIDIA GPUs, `backend.set_backend("cupy")` runs the same code on a GPU; this
+optional backend, and when it pays off, are the subject of @sec-design.
 
 ### Floating-point numbers
 

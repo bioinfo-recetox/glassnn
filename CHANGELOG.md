@@ -7,6 +7,13 @@ annotated git tags.
 
 ## [Unreleased]
 
+### Changed
+
+- Book: the preface has a "How to read this book" guide (parts, chapter
+  sections, appendices, notebooks) instead of the "under construction"
+  note; chapter 1 points to the GPU backend (chapter 13) and to the
+  chapters on layers, losses, initializers and optimizers.
+
 ## [0.1.0] - 2026-10-19
 
 ### Highlights
