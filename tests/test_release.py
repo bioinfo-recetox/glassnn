@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 TAG = f"v{VERSION}"
 REPO_URL = "https://github.com/bioinfo-recetox/glassnn"
 
@@ -44,7 +44,10 @@ def test_changelog_release_section_starts_with_highlights():
 
 def test_changelog_has_comparison_links():
     assert f"[Unreleased]: {REPO_URL}/compare/{TAG}...HEAD" in CHANGELOG
-    assert f"[{VERSION}]: {REPO_URL}/releases/tag/{TAG}" in CHANGELOG
+    # The first release links to its tag, later ones to the comparison.
+    link = re.escape(f"[{VERSION}]: {REPO_URL}/")
+    target = rf"(releases/tag/{re.escape(TAG)}|compare/v[\d.]+\.\.\.{re.escape(TAG)})"
+    assert re.search(rf"^{link}{target}$", CHANGELOG, flags=re.M)
 
 
 def test_release_workflow_extracts_non_empty_notes(tmp_path):
@@ -63,7 +66,7 @@ def test_release_workflow_extracts_non_empty_notes(tmp_path):
     notes = (tmp_path / "notes.md").read_text()
     assert notes.lstrip().startswith("### Highlights")
     assert "## [" not in notes  # stops before the next version
-    assert "Milestone M8" in notes
+    assert "### Highlights" in notes and len(notes.splitlines()) > 3
 
 
 def test_citation_file_describes_the_release():

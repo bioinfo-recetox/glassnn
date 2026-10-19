@@ -96,7 +96,7 @@ GlassNN needs Python 3.13 or newer and depends only on NumPy and SciPy.
 Install a tagged release directly from GitHub:
 
 ```
-pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.0"
+pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.1"
 ```
 
 ### Optional GPU backend
