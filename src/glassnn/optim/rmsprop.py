@@ -1,4 +1,7 @@
-"""RMSprop."""
+"""RMSprop.
+
+Book chapter: :book:`Optimization <chapters/05-optimization.html>`.
+"""
 
 from collections.abc import Iterable
 
@@ -29,6 +32,15 @@ class RMSprop(Optimizer):
         eps: :math:`\epsilon \ge 0`.
         weight_decay: :math:`\lambda \ge 0`.
         momentum: :math:`\mu \ge 0`.
+
+    Example:
+        >>> from glassnn import Tensor, nn, optim
+        >>> p = nn.Parameter([1.0])
+        >>> opt = optim.RMSprop([p], lr=0.1, alpha=0.0)
+        >>> p.grad = Tensor([4.0])
+        >>> opt.step()  # alpha = 0: v = g^2, the step is lr * sign(g)
+        >>> p
+        Parameter([0.9], requires_grad=True)
     """
 
     def __init__(

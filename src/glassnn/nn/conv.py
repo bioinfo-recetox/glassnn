@@ -140,7 +140,7 @@ class Conv1d(_ConvNd):
 
 
 class Conv2d(_ConvNd):
-    r"""2-D convolution layer over images.
+    r"""2-D convolution layer over images :cite:p:`lecun1998gradient`.
 
     See :func:`glassnn.functional.conv2d`. ``kernel_size``, ``stride``,
     ``padding`` and ``dilation`` take an ``int`` or a pair.

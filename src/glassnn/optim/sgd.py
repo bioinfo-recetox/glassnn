@@ -1,4 +1,7 @@
-"""Stochastic gradient descent, with momentum and Nesterov momentum."""
+"""Stochastic gradient descent, with momentum and Nesterov momentum.
+
+Book chapter: :book:`Optimization <chapters/05-optimization.html>`.
+"""
 
 from collections.abc import Iterable
 

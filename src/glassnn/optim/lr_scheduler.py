@@ -12,6 +12,8 @@ once per epoch, after ``optimizer.step()``:
 Each scheduler computes the rate in closed form from the initial rate
 :math:`\eta_0` (``optimizer.lr`` when the scheduler is created) and the
 number of calls :math:`t`.
+
+Book chapter: :book:`Optimization <chapters/05-optimization.html>`.
 """
 
 import math
@@ -52,6 +54,11 @@ class StepLR(LRScheduler):
 
     .. math:: \eta_t = \eta_0\, \gamma^{\lfloor t / s \rfloor}
 
+    Args:
+        optimizer: The optimizer whose ``lr`` is changed.
+        step_size: The period :math:`s`.
+        gamma: The factor :math:`\gamma`.
+
     Example:
         >>> from glassnn import nn, optim
         >>> opt = optim.SGD([nn.Parameter([0.0])], lr=1.0)
@@ -84,6 +91,23 @@ class CosineAnnealingLR(LRScheduler):
         \left(1 + \cos \frac{\pi t}{T_\max}\right)
 
     :cite:p:`loshchilov2017sgdr` (without the restarts).
+
+    Args:
+        optimizer: The optimizer whose ``lr`` is changed.
+        T_max: The number of steps :math:`T_\max` of the decay; after it
+            the rate stays at ``eta_min``.
+        eta_min: The final rate :math:`\eta_\min`.
+
+    Example:
+        >>> from glassnn import nn, optim
+        >>> opt = optim.SGD([nn.Parameter([0.0])], lr=1.0)
+        >>> scheduler = optim.CosineAnnealingLR(opt, T_max=4)
+        >>> rates = []
+        >>> for _ in range(5):
+        ...     rates.append(opt.lr)
+        ...     scheduler.step()
+        >>> [round(r, 4) for r in rates]
+        [1.0, 0.8536, 0.5, 0.1464, 0.0]
     """
 
     def __init__(self, optimizer: Optimizer, T_max: int, eta_min: float = 0.0) -> None:
@@ -105,6 +129,15 @@ class LinearWarmup(LRScheduler):
         \frac{\min(t, T)}{T}\right)
 
     with :math:`f_0` = ``start_factor`` and :math:`T` = ``warmup_steps``.
+    A warm-up keeps the first updates small while Adam's moment estimates,
+    or the statistics of a large batch, are still unreliable
+    :cite:p:`goyal2017accurate`.
+
+    Args:
+        optimizer: The optimizer whose ``lr`` is changed.
+        warmup_steps: The length :math:`T` of the warm-up.
+        start_factor: :math:`f_0 \in (0, 1]`, the fraction of the rate at
+            step 0.
 
     Note:
         Differences from PyTorch: the same schedule is
@@ -114,6 +147,17 @@ class LinearWarmup(LRScheduler):
     Raises:
         ValueError: If ``warmup_steps < 1`` or ``start_factor`` is not in
             :math:`(0, 1]`.
+
+    Example:
+        >>> from glassnn import nn, optim
+        >>> opt = optim.SGD([nn.Parameter([0.0])], lr=1.0)
+        >>> scheduler = optim.LinearWarmup(opt, warmup_steps=2, start_factor=0.5)
+        >>> rates = []
+        >>> for _ in range(4):
+        ...     rates.append(opt.lr)
+        ...     scheduler.step()
+        >>> rates
+        [0.5, 0.75, 1.0, 1.0]
     """
 
     def __init__(

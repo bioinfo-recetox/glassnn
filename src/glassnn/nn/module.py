@@ -1,4 +1,8 @@
-"""``Module``, the base class of all layers and models, and ``Sequential``."""
+"""``Module``, the base class of all layers and models, and ``Sequential``.
+
+Book chapter: :book:`Backpropagation in a multilayer perceptron
+<chapters/03-mlp.html>`.
+"""
 
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any

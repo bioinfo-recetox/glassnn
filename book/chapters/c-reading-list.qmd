@@ -1,0 +1,80 @@
+# Reading list {#sec-reading-list}
+
+Every work cited in the book and in the API reference, grouped by topic.
+Full entries are in the [References](../references.html).
+
+## Textbooks and automatic differentiation
+
+- @goodfellow2016deep: the standard textbook on deep learning.
+- @rumelhart1986learning: backpropagation for training neural networks.
+- @griewank2008evaluating: the theory of algorithmic differentiation,
+  forward and reverse mode.
+- @baydin2018automatic: a survey of automatic differentiation in machine
+  learning.
+
+## Optimization
+
+- @sutskever2013importance: momentum and initialization in deep learning.
+- @kingma2015adam: Adam.
+- @loshchilov2019decoupled: decoupled weight decay (AdamW).
+- @hinton2012lecture: RMSprop, introduced in lecture slides.
+- @loshchilov2017sgdr: cosine learning-rate schedules with restarts.
+- @goyal2017accurate: linear warm-up of the learning rate for large
+  batches.
+- @pascanu2013difficulty: exploding gradients and gradient-norm clipping.
+
+## Initialization and activations
+
+- @glorot2010understanding: Xavier/Glorot initialization.
+- @he2015delving: Kaiming/He initialization for ReLU networks.
+- @hendrycks2016gaussian: the GELU activation.
+
+## Regularization and normalization
+
+- @srivastava2014dropout: dropout.
+- @ioffe2015batch: batch normalization.
+- @ba2016layer: layer normalization.
+- @szegedy2016rethinking: label smoothing.
+
+## Generalization
+
+- @zhang2017understanding: networks fit random labels.
+- @belkin2019reconciling: double descent and the classical bias-variance
+  trade-off.
+- @nakkiran2020deep: double descent in deep networks.
+- @bartlett2020benign: benign overfitting in linear regression.
+- @rahimi2007random: random features for kernel machines.
+
+## The neural tangent kernel
+
+- @jacot2018neural: the neural tangent kernel.
+- @lee2019wide: wide networks evolve as linear models.
+- @chizat2019lazy: lazy training.
+
+## Convolutions and sequences
+
+- @lecun1998gradient: convolutional networks trained by gradient descent.
+- @chellapilla2006high: convolutions as matrix products (im2col).
+- @alipanahi2015predicting: convolutional networks for DNA- and
+  RNA-binding specificities.
+- @zhou2015predicting: predicting the effects of noncoding variants with
+  deep learning.
+- @leslie2002spectrum: the spectrum kernel.
+- @leslie2004mismatch: the mismatch kernel.
+
+## Attention and representations
+
+- @vaswani2017attention: the transformer.
+- @xiong2020layer: pre-LN against post-LN transformers.
+- @hinton2006reducing: deep autoencoders.
+- @bengio2013representation: a review of representation learning.
+- @scholkopf1998nonlinear: kernel PCA.
+- @bakir2003learning: pre-images in kernel methods.
+
+## Software and numerical computing
+
+- @harris2020array: NumPy.
+- @paszke2019pytorch: PyTorch.
+- @okuta2017cupy: CuPy.
+- @dlpack: DLPack, the array-exchange format.
+- @blanchard2021accurately: accurate log-sum-exp and softmax.

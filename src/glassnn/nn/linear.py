@@ -1,4 +1,9 @@
-"""The fully connected layer ``Linear``."""
+"""The fully connected layer ``Linear``.
+
+Book chapters: :book:`Backpropagation in a multilayer perceptron
+<chapters/03-mlp.html>`;
+the NTK parametrization: :book:`The neural tangent kernel <chapters/08-ntk.html>`.
+"""
 
 import math
 

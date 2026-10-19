@@ -50,6 +50,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v10.2.0  # no floating major tag upstream
-      - run: uv sync --extra dev
+      # The examples extra executes the Colab notebooks (tests/test_colab_notebooks.py).
+      - run: uv sync --extra dev --extra examples
       - run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: uv run --no-sync pytest -m torch

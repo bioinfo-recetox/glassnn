@@ -1,4 +1,8 @@
-"""``Parameter``: a tensor that a module learns."""
+"""``Parameter``: a tensor that a module learns.
+
+Book chapter: :book:`Backpropagation in a multilayer perceptron
+<chapters/03-mlp.html>`.
+"""
 
 from typing import Any
 
