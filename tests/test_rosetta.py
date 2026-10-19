@@ -91,10 +91,11 @@ def test_markdown_table_has_one_line_per_row_plus_header():
 NOTEBOOKS = sorted(COLAB.glob("*.ipynb"))
 
 
-def test_there_are_two_colab_notebooks():
+def test_there_are_three_colab_notebooks():
     assert [path.name for path in NOTEBOOKS] == [
         "A_mlp_init.ipynb",
         "B_cnn_motif.ipynb",
+        "C_protein_embeddings.ipynb",
     ]
 
 
