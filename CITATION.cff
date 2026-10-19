@@ -2,8 +2,24 @@ cff-version: 1.2.0
 message: "If you use GlassNN in teaching or research, please cite it as below."
 title: "GlassNN: a transparent teaching library for neural networks"
 type: software
+version: "0.1.0"
+date-released: "2026-10-19"
+abstract: >-
+  GlassNN is a small neural-network library for teaching, written to be
+  read. It implements reverse-mode automatic differentiation, layers from
+  multilayer perceptrons to the transformer encoder, and the usual
+  optimizers in NumPy, with PyTorch's names and defaults, an optional CuPy
+  backend for NVIDIA GPUs, and a book that derives every operation next to
+  its code.
+keywords:
+  - neural networks
+  - automatic differentiation
+  - deep learning
+  - teaching
+  - NumPy
 license: MIT
 repository-code: "https://github.com/bioinfo-recetox/glassnn"
+url: "https://bioinfo-recetox.github.io/glassnn/"
 authors:
   - family-names: Popovici
     given-names: Vlad
