@@ -7,6 +7,28 @@ annotated git tags.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-19
+
+### Highlights
+
+- The first release of GlassNN, a neural-network library whose source code
+  is meant to be read: reverse-mode automatic differentiation in `Tensor`,
+  with every operation's derivative written in its docstring and checked
+  against finite differences.
+- PyTorch's names and defaults for modules, layers, losses, optimizers and
+  schedulers: MLPs, 1-D and 2-D convolutions, attention and the transformer
+  encoder, dropout and normalization, SGD, Adam, AdamW and RMSprop.
+- Tools for the theory of the lectures: activation statistics through
+  depth, the empirical neural tangent kernel, the NTK parametrization.
+- An optional GPU backend (CuPy, CUDA 13) with identical results for a
+  given seed, and zero-copy exchange through DLPack.
+- A book with the theory, the code and exercises (13 chapters, 3
+  appendices), an API reference, and eight example notebooks, plus two
+  PyTorch notebooks for Google Colab and a table of every difference from
+  PyTorch.
+- Cross-checked against PyTorch layer by layer; runtime dependencies are
+  NumPy and SciPy only.
+
 ### Added
 
 - Project skeleton (milestone M0): `src` layout, `pyproject.toml` with the
@@ -192,8 +214,15 @@ annotated git tags.
   `examples` extra to run the notebooks.
 - Verified references: Paszke et al. 2019 (PyTorch), Blanchard, Higham and
   Higham 2021, Goyal et al. 2017, Pascanu, Mikolov and Bengio 2013.
+- Milestone M8 (release 0.1.0): this changelog section with its
+  highlights, `CITATION.cff` with version and release date, the classifier
+  "Development Status :: 3 - Alpha", and `tests/test_release.py`, which
+  checks these against each other, runs the release-notes step of
+  `release.yml`, and checks that every pinned tag names this release.
 
 ### Differences from PyTorch
+
+The complete table is in chapter 12 of the book (`book/assets/rosetta.toml`).
 
 - Optimizers have one parameter group; the learning rate is `optimizer.lr`.
 - `clip_grad_norm_` lives in `glassnn.optim`; `one_hot` in `glassnn.data`.
@@ -234,3 +263,6 @@ Features deliberately kept out of scope (see `PLAN.md`, section 10):
   as ESM-2, fed to a linear classifier): optional in `PLAN.md`, section 9;
   deferred because it needs `transformers`, a model download and a verified
   model name, and cannot run in CI (decision 45).
+
+[Unreleased]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/bioinfo-recetox/glassnn/releases/tag/v0.1.0
