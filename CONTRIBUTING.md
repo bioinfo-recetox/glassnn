@@ -27,6 +27,7 @@ uv run pytest                                  # tests (torch and gpu markers ex
 uv pip install torch --index-url https://download.pytorch.org/whl/cpu  # once; not in the lock file
 uv run pytest -m torch                         # PyTorch cross-checks
 uv run pytest -m gpu                           # CuPy parity tests (needs CuPy and a GPU)
+uv run pytest -m network                       # Colab notebook C (needs torch, transformers, internet)
 uv run ruff check . && uv run ruff format --check .
 uv run sphinx-build -W docs docs/_build/html   # API reference
 uv run quarto render book                      # the book
@@ -39,7 +40,10 @@ PyTorch), copy it into the Colab notebooks with
 `uv run python examples/colab_pytorch/_sync_rosetta.py`; `tests/test_rosetta.py`
 fails until then, and also when a docstring gains a "Differences from
 PyTorch" note without a row in the table. The Colab notebooks are executed by
-`uv run pytest -m torch` (needs the `examples` extra).
+`uv run pytest -m torch` (needs the `examples` extra). Notebook C also needs
+Hugging Face `transformers` (`uv pip install transformers`; like torch, not
+in the lock file) and downloads a model; it is executed by
+`uv run pytest -m network`, which CI does not run.
 
 ## Releasing
 

@@ -55,7 +55,7 @@ playing the same parts.
 ### What PyTorch adds
 
 PyTorch is built for models a thousand times larger than those of the
-lectures, and that shows in four places:
+lectures, and that shows in five places:
 
 - **Devices.** Every tensor lives on a device (`x.to("cuda")`); GlassNN
   switches the whole library at once (@sec-design).
@@ -65,6 +65,12 @@ lectures, and that shows in four places:
 - **Inspection by hooks.** Instead of helpers such as
   `analysis.activation_stats`, PyTorch lets you attach a *forward hook* to
   any module; notebook A shows how.
+- **Pretrained models.** Libraries built on PyTorch, such as Hugging Face
+  `transformers`, download a model trained by others, with its weights, in
+  one line. GlassNN loads no pretrained models; notebook C turns proteins
+  into vectors with the protein language model ESM-2
+  [@rives2021biological; @lin2023evolutionary] and trains a linear
+  classifier on them.
 - **Speed.** Fused kernels, `torch.compile`, mixed precision and
   distributed training. None of it changes the mathematics of the earlier
   chapters.
@@ -83,8 +89,10 @@ do (Exercise 12.1).
 ::: {.callout-note title="Where in the code"}
 The PyTorch notebooks are in `examples/colab_pytorch/`: notebook A
 (initialization and depth, the counterpart of example 02) and notebook B
-(the CNN on DNA, the counterpart of example 06). Each ends with the Rosetta
-table below.
+(the CNN on DNA, the counterpart of example 06). Notebook C has no GlassNN
+counterpart: it compares the amino-acid composition of proteins with the
+embeddings of a pretrained protein language model, as inputs of the same
+linear classifier. Each notebook ends with the Rosetta table below.
 
 The table itself is one data file, `book/assets/rosetta.toml`. This
 chapter renders it,
@@ -175,6 +183,8 @@ Open them directly on Colab:
 
 - [A: initialization and depth](https://colab.research.google.com/github/bioinfo-recetox/glassnn/blob/main/examples/colab_pytorch/A_mlp_init.ipynb)
 - [B: a 1-D CNN finds a DNA motif](https://colab.research.google.com/github/bioinfo-recetox/glassnn/blob/main/examples/colab_pytorch/B_cnn_motif.ipynb)
+- [C: protein language-model embeddings and a linear classifier](https://colab.research.google.com/github/bioinfo-recetox/glassnn/blob/main/examples/colab_pytorch/C_protein_embeddings.ipynb)
+  (optional; downloads a 30 MB model)
 
 ## Exercises
 
@@ -247,3 +257,6 @@ in GlassNN and post-LN with ReLU in PyTorch.
   GlassNN leaves out.
 - The test suite compares GlassNN with PyTorch layer by layer
   (`tests/test_torch_crosscheck.py`, marker `torch`).
+- Protein language models: ESM-1b, and the observation that structure and
+  function emerge from unsupervised training on protein sequences,
+  @rives2021biological; ESM-2, the model of notebook C, @lin2023evolutionary.

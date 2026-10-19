@@ -71,10 +71,11 @@ packages = ["src/glassnn"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]
-addopts = "--doctest-modules -m 'not torch and not gpu'"
+addopts = "--doctest-modules -m 'not torch and not gpu and not network'"
 markers = [
     "torch: cross-checks against PyTorch (needs torch installed)",
     "gpu: CuPy backend parity tests (needs CuPy and a GPU)",
+    "network: Colab notebook C (needs torch, transformers and internet access)",
 ]
 
 [tool.coverage.run]

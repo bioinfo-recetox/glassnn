@@ -7,6 +7,18 @@ annotated git tags.
 
 ## [Unreleased]
 
+### Added
+
+- Colab notebook C (`examples/colab_pytorch/C_protein_embeddings.ipynb`):
+  embeddings of the protein language model ESM-2 (`esm2_t6_8M_UR50D` at a
+  fixed revision), fed to a linear classifier, against the amino-acid
+  composition, on 500 human proteins from UniProt (nucleus or cytoplasm).
+  The data file `examples/protein_localization.fasta` is written by
+  `examples/_fetch_proteins.py` and downloaded by the notebook from `main`
+  (decision 51). The notebook is executed by the new test marker `network`,
+  which needs `transformers` and internet access and is not run in CI.
+- Book chapter 12: notebook C, and the references of ESM-1b and ESM-2.
+
 ### Changed
 
 - README and book chapter 1: installation on Google Colab, with a note on
@@ -277,12 +289,8 @@ The complete table is in chapter 12 of the book (`book/assets/rosetta.toml`).
 
 ## Later
 
-Features deliberately kept out of scope (see `PLAN.md`, section 10):
-
-- Colab notebook C (embeddings from a pretrained protein language model such
-  as ESM-2, fed to a linear classifier): optional in `PLAN.md`, section 9;
-  deferred because it needs `transformers`, a model download and a verified
-  model name, and cannot run in CI (decision 45).
+Features deliberately kept out of scope (see `PLAN.md`, section 10): none
+at the moment.
 
 [Unreleased]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/bioinfo-recetox/glassnn/compare/v0.1.0...v0.1.1
