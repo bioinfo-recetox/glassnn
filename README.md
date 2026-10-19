@@ -87,8 +87,9 @@ True
 Where next: the [book](https://bioinfo-recetox.github.io/glassnn/) derives
 every operation and shows its code; chapter 12 lists where GlassNN and
 PyTorch differ, and has PyTorch versions of two example notebooks for
-Google Colab. The same code runs on an NVIDIA GPU after
-`backend.set_backend("cupy")` (below).
+Google Colab, plus a third that uses a pretrained protein language model.
+The same code runs on an NVIDIA GPU after `backend.set_backend("cupy")`
+(below).
 
 ## Installation
 

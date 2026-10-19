@@ -20,6 +20,11 @@ expected finding at a smaller scale.
 kernels. `expression.py` simulates the expression data of notebook 08
 (`PLAN.md`, decision 37).
 
+`colab_pytorch/` holds the PyTorch notebooks for Google Colab (book
+chapter 12). Notebook C reads `protein_localization.fasta`, 500 human
+proteins from UniProt (CC BY 4.0), written by `_fetch_proteins.py`
+(`PLAN.md`, decision 51).
+
 The notebooks are stored without outputs. Run them in Jupyter
 (`uv sync --extra examples`, then `uv run jupyter lab` if Jupyter is
 installed), or execute all of them as CI does:

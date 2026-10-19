@@ -70,6 +70,9 @@ Full entries are in the [References](../references.html).
 - @bengio2013representation: a review of representation learning.
 - @scholkopf1998nonlinear: kernel PCA.
 - @bakir2003learning: pre-images in kernel methods.
+- @rives2021biological: a protein language model (ESM-1b); structure and
+  function emerge from unsupervised training on sequences.
+- @lin2023evolutionary: ESM-2, the model of Colab notebook C.
 
 ## Software and numerical computing
 
