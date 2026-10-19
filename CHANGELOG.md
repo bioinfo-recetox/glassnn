@@ -7,6 +7,11 @@ annotated git tags.
 
 ## [Unreleased]
 
+### Changed
+
+- README and book chapter 1: installation on Google Colab, with a note on
+  restarting the session when pip upgrades NumPy.
+
 ## [0.1.1] - 2026-10-19
 
 ### Highlights

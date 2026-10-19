@@ -99,6 +99,19 @@ Install a tagged release directly from GitHub:
 pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.1"
 ```
 
+### Google Colab
+
+In the first cell of a notebook:
+
+```
+%pip install "glassnn @ git+https://github.com/bioinfo-recetox/glassnn@v0.1.1"
+```
+
+GlassNN needs NumPy 2.5 or newer. If the NumPy preinstalled on Colab is
+older, pip upgrades it, and Colab may then ask you to restart the session
+(the NumPy already loaded in memory is the old one). If it does, restart
+once and run the cells again.
+
 ### Optional GPU backend
 
 The optional GPU backend uses [CuPy](https://cupy.dev) with CUDA 13
