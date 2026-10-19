@@ -220,7 +220,7 @@ Lecture 11 (architectures and representations):
 `examples/colab_pytorch/` (separate from the package, written for Google Colab where PyTorch is preinstalled):
 - A. the MLP of example 2 or 3 in PyTorch;
 - B. the CNN of example 6 in PyTorch;
-- C. optional: embeddings from a **pretrained protein language model** (for example a small ESM-2 checkpoint from Hugging Face) fed to a linear classifier. This needs internet access and a model download, and the exact model name must be verified before publishing. It illustrates representation learning at scale (Rives et al. 2021; Lin et al. 2023).
+- C. optional: embeddings from a **pretrained protein language model** (for example a small ESM-2 checkpoint from Hugging Face) fed to a linear classifier. This needs internet access and a model download, and the exact model name must be verified before publishing. It illustrates representation learning at scale (Rives et al. 2021; Lin et al. 2023). Done after 0.1.1 (decision 51): `facebook/esm2_t6_8M_UR50D` at a fixed revision, nuclear against cytoplasmic human proteins, compared with the amino-acid composition.
 
 Each Colab notebook ends with the same Rosetta table: library name, argument, and behaviour that differ between GlassNN and PyTorch. The table is the same as in book chapter 12.
 
@@ -331,11 +331,12 @@ Software
 | 42 | GPU results in the book | GPU cells of chapter 13 are not executed; the benchmark script writes `book/assets/benchmark_backends.json` (hardware, versions, date) and the chapter renders its table (owner, 2026-10-15) |
 | 43 | Rosetta table | one data file `book/assets/rosetta.toml` (TOML, read with the standard library, so the CI test job needs no extra package); chapter 12 renders it, `examples/colab_pytorch/_sync_rosetta.py` writes it into the notebooks, `tests/test_rosetta.py` requires a row for every "Differences from PyTorch" note and current copies (owner, 2026-10-16) |
 | 44 | Data of Colab notebook B | downloaded from GitHub at the pinned tag (`dna_motifs.py`); CI runs the notebook in `examples/`, where the file exists (owner, 2026-10-16) |
-| 45 | Colab notebook C | deferred to the CHANGELOG "Later" list (owner, 2026-10-16) |
+| 45 | Colab notebook C | deferred to the CHANGELOG "Later" list (owner, 2026-10-16); replaced by decision 51 |
 | 46 | Complete API reference | by kind: every public symbol has summary, `Args`, `Returns`, example; math for operations, layers, losses, initializers, optimizers, schedulers; references where literature exists; exemptions listed in `tests/test_docstrings.py` (owner, 2026-10-16) |
 | 47 | Release date | the day the owner tags; `CHANGELOG.md` and `CITATION.cff` carry it, `tests/test_release.py` keeps them equal (owner, 2026-10-16) |
 | 48 | Citation metadata | name and affiliation, no ORCID (owner, 2026-10-16) |
 | 49 | Classifier of 0.1.0 | `Development Status :: 3 - Alpha` (owner, 2026-10-16) |
 | 50 | Release notes | the 0.1.0 section opens with a short "Highlights" list, followed by the detailed list kept since M0 (owner, 2026-10-16) |
+| 51 | Colab notebook C | model `facebook/esm2_t6_8M_UR50D` (MIT license) pinned to a revision; data: 500 reviewed human UniProt proteins, nucleus or cytoplasm, shipped as `examples/protein_localization.fasta` (written by `examples/_fetch_proteins.py`) and downloaded by the notebook from `main`, not from a tag, so it works before the next release; classifier: `torch.nn.Linear` trained like notebooks A and B; tests: structure tests in CI, execution under the marker `network` (torch, `transformers`, internet), not in CI (owner, 2026-10-19) |
 
 Confirmed by the owner: the repository name `glassnn` is free in `bioinfo-recetox`; Colab runs Python 3.13.15.
